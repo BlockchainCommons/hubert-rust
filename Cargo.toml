@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bc-crypto = "^0.10.0"
 dcbor = { version = "^0.23.0", features = ["multithreaded"] }
 bc-components = "^0.25.0"
 bc-envelope = "^0.34.0"
 bc-xid = "^0.13.0"
+gstp = "^0.10.0"
 
 ipfs-api-backend-hyper = "0.6.0"
 ipfs-api-prelude = "0.6.0"
