@@ -1,50 +1,17 @@
 use anyhow::Result;
-use mainline::{Dht, MutableItem, SigningKey, Testnet};
-use tokio::time::{sleep, Duration, Instant};
+use mainline::{Dht, MutableItem, SigningKey, Testnet, async_dht::AsyncDht};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Configuration for DHT test scenarios.
-enum DhtConfig {
-    /// In-process testnet with specified number of bootstrap nodes.
-    Testnet(usize),
-    /// Real Mainline DHT using default bootstrap nodes.
-    Mainnet,
-}
+use tokio::time::{Duration, Instant, sleep};
 
 /// Shared test logic: stores a BEP-44 mutable value with a selected key (+salt),
 /// then retrieves the most recent item from a separate agent.
-async fn mutable_roundtrip_test(config: DhtConfig) -> Result<()> {
-    // Keep testnet alive for the entire test duration.
-    let _testnet;
-
-    // Writer / Reader setup + timeout per environment.
-    let (writer, reader, timeout) = match config {
-        DhtConfig::Testnet(nodes) => {
-            _testnet = Some(Testnet::new_async(nodes).await?);
-
-            let writer = Dht::builder()
-                .bootstrap(&_testnet.as_ref().unwrap().bootstrap)
-                .build()?
-                .as_async();
-
-            let reader = Dht::builder()
-                .bootstrap(&_testnet.as_ref().unwrap().bootstrap)
-                .build()?
-                .as_async();
-
-            (writer, reader, Duration::from_secs(5))
-        }
-        DhtConfig::Mainnet => {
-            _testnet = None;
-
-            // Default bootstrap nodes (public mainnet).
-            let writer = Dht::client()?.as_async();
-            let reader = Dht::client()?.as_async();
-
-            (writer, reader, Duration::from_secs(30))
-        }
-    };
-
+async fn mutable_roundtrip_test(
+    writer: AsyncDht,
+    reader: AsyncDht,
+    timeout: Duration,
+    delay: Duration,
+    poll_interval: Duration,
+) -> Result<()> {
     // Ensure both nodes are bootstrapped.
     assert!(writer.bootstrapped().await, "writer failed to bootstrap");
     assert!(reader.bootstrapped().await, "reader failed to bootstrap");
@@ -67,8 +34,10 @@ async fn mutable_roundtrip_test(config: DhtConfig) -> Result<()> {
     let value: &[u8] = b"hello from mainline (mutable)";
 
     // Read-most-recent → compute next seq → CAS per BEP-44 guidance.
-    // (See crate docs example for lost-update avoidance.) :contentReference[oaicite:1]{index=1}
-    let (item, cas) = if let Some(mr) = writer.get_mutable_most_recent(&pubkey, salt_opt).await {
+    // (See crate docs example for lost-update avoidance.)
+    let (item, cas) = if let Some(mr) =
+        writer.get_mutable_most_recent(&pubkey, salt_opt).await
+    {
         let new_seq = mr.seq() + 1;
         (
             MutableItem::new(signing_key, value, new_seq, salt_opt),
@@ -79,25 +48,22 @@ async fn mutable_roundtrip_test(config: DhtConfig) -> Result<()> {
     };
 
     // Put the mutable item (signed under our selected key).
-    writer.put_mutable(item, cas).await?; // returns Id; we don't need it here. :contentReference[oaicite:2]{index=2}
+    writer.put_mutable(item, cas).await?;
 
     // Allow replication.
-    let delay = match config {
-        DhtConfig::Testnet(_) => Duration::from_millis(200),
-        DhtConfig::Mainnet => Duration::from_secs(1),
-    };
     sleep(delay).await;
 
     // Reader polls the most-recent until it observes our value (soft deadline).
-    let deadline = Instant::now() + timeout;
-    let poll_interval = match config {
-        DhtConfig::Testnet(_) => Duration::from_millis(100),
-        DhtConfig::Mainnet => Duration::from_millis(250),
-    };
-
+    let start = Instant::now();
+    let deadline = start + timeout;
     let mut got = None;
+    let mut iterations = 0;
+
     loop {
-        if let Some(mr) = reader.get_mutable_most_recent(&pubkey, salt_opt).await {
+        iterations += 1;
+        if let Some(mr) =
+            reader.get_mutable_most_recent(&pubkey, salt_opt).await
+        {
             got = Some(mr);
             break;
         }
@@ -107,7 +73,16 @@ async fn mutable_roundtrip_test(config: DhtConfig) -> Result<()> {
         sleep(poll_interval).await;
     }
 
-    let observed = got.expect("reader did not observe the mutable item in time");
+    let elapsed = start.elapsed();
+    println!(
+        "Poll stats: {} iterations, interval={:.3}s, total={:.3}s",
+        iterations,
+        poll_interval.as_secs_f64(),
+        elapsed.as_secs_f64()
+    );
+
+    let observed =
+        got.expect("reader did not observe the mutable item in time");
     assert_eq!(observed.value(), value, "mutable value mismatch");
     // Optional sanity: check we fetched the right channel (pubkey echoed back).
     assert_eq!(observed.key(), &pubkey);
@@ -118,7 +93,27 @@ async fn mutable_roundtrip_test(config: DhtConfig) -> Result<()> {
 /// Testnet variant: runs against an in-process DHT.
 #[tokio::test(flavor = "multi_thread")]
 async fn mutable_put_then_get_testnet() -> Result<()> {
-    mutable_roundtrip_test(DhtConfig::Testnet(5)).await
+    // Create an in-process DHT with its own bootstrap nodes.
+    let testnet = Testnet::new_async(5).await?;
+
+    let writer = Dht::builder()
+        .bootstrap(&testnet.bootstrap)
+        .build()?
+        .as_async();
+
+    let reader = Dht::builder()
+        .bootstrap(&testnet.bootstrap)
+        .build()?
+        .as_async();
+
+    mutable_roundtrip_test(
+        writer,
+        reader,
+        Duration::from_secs(5),
+        Duration::from_millis(200),
+        Duration::from_millis(100),
+    )
+    .await
 }
 
 /// Mainnet variant: hits the real Mainline DHT. Requires outbound UDP.
@@ -126,5 +121,16 @@ async fn mutable_put_then_get_testnet() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "hits the real Mainline DHT and needs UDP connectivity"]
 async fn mutable_put_then_get_mainnet() -> Result<()> {
-    mutable_roundtrip_test(DhtConfig::Mainnet).await
+    // Two separate agents on mainnet using default bootstrap nodes.
+    let writer = Dht::client()?.as_async();
+    let reader = Dht::client()?.as_async();
+
+    mutable_roundtrip_test(
+        writer,
+        reader,
+        Duration::from_secs(30),
+        Duration::from_secs(1),
+        Duration::from_millis(250),
+    )
+    .await
 }

@@ -1,47 +1,16 @@
 use anyhow::Result;
-use mainline::{Dht, Testnet};
+use mainline::{Dht, Testnet, async_dht::AsyncDht};
 use tokio::time::{Duration, sleep};
-
-/// Configuration for DHT test scenarios.
-enum DhtConfig {
-    /// In-process testnet with specified number of bootstrap nodes.
-    Testnet(usize),
-    /// Real Mainline DHT using default bootstrap nodes.
-    Mainnet,
-}
 
 /// Shared test logic: stores an immutable value via one AsyncDHT node,
 /// then retrieves it from a separate AsyncDHT node after a short delay.
-async fn immutable_roundtrip_test(config: DhtConfig) -> Result<()> {
-    // Keep testnet alive for the entire test duration.
-    let _testnet;
-    let (writer, reader, timeout) = match config {
-        DhtConfig::Testnet(nodes) => {
-            // Create an in-process DHT with its own bootstrap nodes.
-            _testnet = Some(Testnet::new_async(nodes).await?);
-
-            let writer = Dht::builder()
-                .bootstrap(&_testnet.as_ref().unwrap().bootstrap)
-                .build()?
-                .as_async();
-
-            let reader = Dht::builder()
-                .bootstrap(&_testnet.as_ref().unwrap().bootstrap)
-                .build()?
-                .as_async();
-
-            (writer, reader, Duration::from_secs(5))
-        }
-        DhtConfig::Mainnet => {
-            _testnet = None;
-            // Two separate agents on mainnet using default bootstrap nodes.
-            let writer = Dht::client()?.as_async();
-            let reader = Dht::client()?.as_async();
-
-            (writer, reader, Duration::from_secs(30))
-        }
-    };
-
+async fn immutable_roundtrip_test(
+    writer: AsyncDht,
+    reader: AsyncDht,
+    timeout: Duration,
+    delay: Duration,
+    poll_interval: Duration,
+) -> Result<()> {
     // Ensure both nodes are bootstrapped before proceeding.
     assert!(writer.bootstrapped().await, "writer failed to bootstrap");
     assert!(reader.bootstrapped().await, "reader failed to bootstrap");
@@ -53,17 +22,16 @@ async fn immutable_roundtrip_test(config: DhtConfig) -> Result<()> {
     let id = writer.put_immutable(msg).await?;
 
     // Give the network a moment to replicate.
-    let delay = match config {
-        DhtConfig::Testnet(_) => Duration::from_millis(200),
-        DhtConfig::Mainnet => Duration::from_secs(1),
-    };
     sleep(delay).await;
 
     // Reader polls until it sees the value (with a soft timeout).
-    let deadline = tokio::time::Instant::now() + timeout;
+    let start = tokio::time::Instant::now();
+    let deadline = start + timeout;
     let mut got = None;
+    let mut iterations = 0;
 
     loop {
+        iterations += 1;
         if let Some(bytes) = reader.get_immutable(id).await {
             got = Some(bytes);
             break;
@@ -71,12 +39,16 @@ async fn immutable_roundtrip_test(config: DhtConfig) -> Result<()> {
         if tokio::time::Instant::now() >= deadline {
             break;
         }
-        let poll_interval = match config {
-            DhtConfig::Testnet(_) => Duration::from_millis(100),
-            DhtConfig::Mainnet => Duration::from_millis(250),
-        };
         sleep(poll_interval).await;
     }
+
+    let elapsed = start.elapsed();
+    println!(
+        "Poll stats: {} iterations, interval={:.3}s, total={:.3}s",
+        iterations,
+        poll_interval.as_secs_f64(),
+        elapsed.as_secs_f64()
+    );
 
     let bytes = got.expect("reader did not retrieve the value in time");
     assert_eq!(&*bytes, msg, "round-tripped value must match original");
@@ -87,7 +59,27 @@ async fn immutable_roundtrip_test(config: DhtConfig) -> Result<()> {
 /// Testnet variant: runs against an in-process DHT.
 #[tokio::test(flavor = "multi_thread")]
 async fn immutable_put_then_get_testnet() -> Result<()> {
-    immutable_roundtrip_test(DhtConfig::Testnet(5)).await
+    // Create an in-process DHT with its own bootstrap nodes.
+    let testnet = Testnet::new_async(5).await?;
+
+    let writer = Dht::builder()
+        .bootstrap(&testnet.bootstrap)
+        .build()?
+        .as_async();
+
+    let reader = Dht::builder()
+        .bootstrap(&testnet.bootstrap)
+        .build()?
+        .as_async();
+
+    immutable_roundtrip_test(
+        writer,
+        reader,
+        Duration::from_secs(5),
+        Duration::from_millis(200),
+        Duration::from_millis(100),
+    )
+    .await
 }
 
 /// Mainnet variant: hits the real Mainline DHT. Requires outbound UDP.
@@ -95,5 +87,16 @@ async fn immutable_put_then_get_testnet() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "hits the real Mainline DHT and needs UDP connectivity"]
 async fn immutable_put_then_get_mainnet() -> Result<()> {
-    immutable_roundtrip_test(DhtConfig::Mainnet).await
+    // Two separate agents on mainnet using default bootstrap nodes.
+    let writer = Dht::client()?.as_async();
+    let reader = Dht::client()?.as_async();
+
+    immutable_roundtrip_test(
+        writer,
+        reader,
+        Duration::from_secs(30),
+        Duration::from_secs(1),
+        Duration::from_millis(250),
+    )
+    .await
 }
