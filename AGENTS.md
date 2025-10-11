@@ -915,7 +915,7 @@ pub enum GetError {
 
 ### 3.5 Reference Envelope Details
 
-**Known Value for Reference:**
+**Plain Reference Envelope (Basic API):**
 ```rust
 // Define a known value to identify reference envelopes
 const IPFS_REFERENCE: &str = "ipfs-reference";
@@ -943,15 +943,94 @@ fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
 }
 ```
 
-### 3.6 Implementation Plan
+**GSTP-Wrapped Reference Envelope (GSTP Convenience API):**
+
+When using Hubert's GSTP convenience methods with Hybrid storage, reference envelopes are wrapped in GSTP messages:
+
+```rust
+// For large GSTP messages, the reference envelope itself becomes a GSTP message
+// This provides authentication and encryption for the indirection
+
+// 1. Create reference envelope payload (as above)
+let reference_payload = Envelope::new(IPFS_REFERENCE)
+    .add_assertion("arid", reference_arid)
+    .add_assertion("size", actual_size);
+
+// 2. Wrap in GSTP message with same sender/receivers as original
+let reference_sealed = if let Some(gstp_request) = original_as_sealed_request {
+    SealedRequest::new_with_body(
+        reference_payload.into(),
+        gstp_request.id(),
+        gstp_request.sender(),
+    )
+    .seal(gstp_request.recipients(), sender_keys)?
+    .into()
+} else if let Some(gstp_response) = original_as_sealed_response {
+    SealedResponse::new_with_body(
+        reference_payload,
+        gstp_response.id(),
+    )
+    .seal(gstp_response.recipients(), sender_keys)?
+    .into()
+} else {
+    // Fall back to plain reference for non-GSTP envelopes
+    reference_payload
+};
+
+// 3. Store GSTP-wrapped reference in DHT
+// Only recipients can decrypt the reference ARID
+```
+
+**Benefits of GSTP-Wrapped References:**
+- **Authentication**: Reference signed by same sender as original message
+- **Confidentiality**: Reference ARID encrypted to same recipients
+- **Access Control**: Only intended recipients can follow the indirection
+- **Integrity**: Tampering with reference is detectable
+- **Consistency**: Reference has same GSTP properties as the payload
+
+### 3.6 GSTP Hybrid Integration
+
+**Put Operation with GSTP:**
+```
+1. Check if envelope is GSTP message (SealedRequest/Response/Event)
+2. Serialize and measure size
+3. IF size ≤ DHT_LIMIT:
+     - Store GSTP envelope directly in DHT
+   ELSE:
+     - Generate reference_arid for IPFS
+     - Store actual GSTP envelope in IPFS using reference_arid
+     - Create reference envelope with reference_arid
+     - Extract GSTP context (sender, recipients, request ID)
+     - Wrap reference envelope in new GSTP message (same sender/recipients)
+     - Store GSTP-wrapped reference in DHT
+```
+
+**Get Operation with GSTP:**
+```
+1. Retrieve envelope from DHT
+2. IF envelope is GSTP message:
+     - Decrypt GSTP message (if recipient)
+     - Check if decrypted content is reference envelope
+     - IF reference:
+         - Extract reference_arid
+         - Retrieve actual GSTP envelope from IPFS
+         - Return actual GSTP envelope
+     - ELSE:
+         - Return DHT GSTP envelope directly
+   ELSE:
+     - Handle as plain envelope (fallback to basic reference logic)
+```
+
+### 3.7 Implementation Plan
 
 #### Phase 1: Reference Envelope Infrastructure
 
 1. **Reference Envelope Module** (`hybrid/reference.rs`)
    - Define reference envelope format
-   - Create reference envelope builder
+   - Create reference envelope builder (plain)
    - Parse and validate reference envelopes
    - Extract reference ARID from reference envelope
+   - Detect if envelope is reference (plain or GSTP-wrapped)
    - Unit tests for reference envelope operations
 
 2. **Size Estimation** (`hybrid/sizing.rs`)
@@ -959,6 +1038,7 @@ fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
    - Bencode overhead estimation for DHT
    - Helper to determine if envelope fits in DHT
    - Include reference envelope overhead in calculations
+   - Account for GSTP wrapping overhead
 
 #### Phase 2: Hybrid Put/Get Operations
 
@@ -968,15 +1048,15 @@ fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
    - **DHT-only path**: Direct storage in DHT
    - **Hybrid path**:
      - Generate new ARID for IPFS
-     - Create reference envelope
-     - Store reference in DHT
+     - Create plain reference envelope
      - Store actual envelope in IPFS
+     - Store reference in DHT
    - Return appropriate PutReceipt with location info
    - Handle AlreadyExists from both layers
 
 4. **Get Implementation** (`hybrid/get.rs`)
    - Retrieve envelope from DHT
-   - Check if reference envelope
+   - Check if reference envelope (plain format)
    - **Direct path**: Return DHT envelope
    - **Hybrid path**:
      - Extract reference ARID
@@ -984,47 +1064,77 @@ fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
      - Return actual envelope
    - Handle missing references gracefully
 
-5. **Exists Check** (`hybrid/exists.rs`)
+5. **GSTP-Enhanced Put** (`hybrid/gstp_put.rs`)
+   - Detect if envelope is GSTP message
+   - Extract GSTP context (sender, recipients, request ID)
+   - **DHT-only path**: Store GSTP envelope directly
+   - **Hybrid path**:
+     - Generate reference_arid for IPFS
+     - Store actual GSTP envelope in IPFS
+     - Create plain reference envelope
+     - Wrap reference in new GSTP message (same sender/recipients)
+     - Store GSTP-wrapped reference in DHT
+   - Return PutReceipt with GSTP metadata
+
+6. **GSTP-Enhanced Get** (`hybrid/gstp_get.rs`)
+   - Retrieve envelope from DHT
+   - IF GSTP message:
+       - Attempt to decrypt (returns error if not recipient)
+       - Check if decrypted content is reference envelope
+       - IF reference: follow to IPFS, return actual GSTP envelope
+       - ELSE: return DHT GSTP envelope
+   - ELSE: fallback to plain get logic
+
+7. **Exists Check** (`hybrid/exists.rs`)
    - Check DHT only (references count as existing)
    - Optional: verify IPFS reference is retrievable
 
 #### Phase 3: Error Handling & Validation
 
-6. **Error Types** (`hybrid/error.rs`)
+8. **Error Types** (`hybrid/error.rs`)
    - `PutError` with DHT and IPFS variants
    - `GetError` with reference-specific errors
    - InvalidReference for malformed reference envelopes
    - ReferenceNotFound for missing IPFS content
+   - GSTP-specific errors (decryption failure, not a recipient)
    - Proper error conversion from underlying layers
 
-7. **Storage Info** (`hybrid/info.rs`)
+9. **Storage Info** (`hybrid/info.rs`)
    - Diagnostic API to check storage location
    - Return whether envelope is reference or direct
+   - Indicate if reference is GSTP-wrapped
    - Include size and location metadata
 
 #### Phase 4: Testing & Documentation
 
-8. **Integration Tests**
-   - Small envelope roundtrip (DHT-only path)
-   - Large envelope roundtrip (Hybrid path)
-   - Reference envelope parsing
-   - Missing reference handling
-   - AlreadyExists with both DHT and IPFS
-   - Size boundary conditions (exactly at limit)
+10. **Integration Tests**
+    - Small envelope roundtrip (DHT-only path)
+    - Large envelope roundtrip (Hybrid path)
+    - Reference envelope parsing (plain and GSTP-wrapped)
+    - Missing reference handling
+    - AlreadyExists with both DHT and IPFS
+    - Size boundary conditions (exactly at limit)
+    - **GSTP-wrapped references**:
+      - Large GSTP message creates GSTP-wrapped reference
+      - Only recipients can decrypt reference ARID
+      - Non-recipient cannot follow indirection
+      - Tampered GSTP reference fails verification
 
-9. **Documentation**
-   - Hybrid storage strategy explained
-   - When DHT vs IPFS is used
-   - Reference envelope format specification
-   - Performance characteristics
-   - Troubleshooting missing references
+11. **Documentation**
+    - Hybrid storage strategy explained
+    - When DHT vs IPFS is used
+    - Reference envelope format specification (plain and GSTP-wrapped)
+    - GSTP integration benefits (authenticated/encrypted references)
+    - Performance characteristics
+    - Troubleshooting missing references
 
-### 3.7 Size Limits & Tradeoffs
+### 3.8 Size Limits & Tradeoffs
 
 **DHT Size Limit:**
 - Conservative: 1000 bytes serialized dCBOR
-- Reference envelope overhead: ~100 bytes
-- Effective payload for hybrid: ~900 bytes leaves room for reference
+- Plain reference envelope overhead: ~100 bytes
+- GSTP-wrapped reference overhead: ~200-300 bytes (includes encryption/signature)
+- Effective payload for hybrid: ~700-900 bytes depending on GSTP usage
 
 **Decision Points:**
 - Envelope < 1000 bytes → DHT-only (optimal: fast, no dependencies)
@@ -1056,6 +1166,13 @@ fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
 - Missing IPFS reference returns `ReferenceNotFound` error
 - Caller can retry put operation with new ARID
 - Consider external monitoring for dangling references
+
+**GSTP Reference Security:**
+- GSTP-wrapped references provide access control
+- Only recipients can decrypt reference ARID
+- Attackers cannot follow indirection without recipient keys
+- Reference tampering detected via GSTP signature verification
+- Same security properties as payload (end-to-end encryption/authentication)
 
 ---
 
@@ -1177,6 +1294,10 @@ let envelope: Envelope = event.into();
 - **Stateless via ESC**: Encrypted State Continuations embedded in messages
 - **Multi-Recipient**: Single message encrypted to multiple recipients
 - **Public Lookup**: ARID can be shared publicly; only recipients can decrypt
+- **Hybrid Security**: With Hybrid storage, even reference envelopes are GSTP-wrapped
+  - Reference ARID encrypted to same recipients as payload
+  - Attackers cannot follow indirection without recipient keys
+  - End-to-end security preserved across both storage layers
 
 ### 4.4 Encrypted State Continuations (ESC)
 
@@ -1239,7 +1360,60 @@ impl MainlineDhtKv {
 
 **Note**: The core API already handles Envelopes, so GSTP integration is primarily about documentation and example patterns rather than new API surface.
 
-### 4.6 Testing Strategy
+### 5.6 GSTP + Hybrid: Secured Indirection
+
+When using GSTP convenience methods with Hybrid storage, large messages benefit from an additional security layer:
+
+**Traditional Hybrid (Plain References):**
+- Large envelope → Reference envelope in DHT (plain) → Actual envelope in IPFS
+- Reference ARID visible to anyone who can read DHT
+- Anyone with reference ARID can retrieve IPFS content
+
+**GSTP + Hybrid (Wrapped References):**
+- Large GSTP envelope → GSTP-wrapped reference in DHT → Actual GSTP envelope in IPFS
+- Reference ARID encrypted within GSTP message
+- Only intended recipients can decrypt reference ARID
+- Only intended recipients can follow indirection to IPFS
+- End-to-end security preserved across both storage layers
+
+**Example Flow:**
+```rust
+// 1. Sender creates large GSTP message
+let large_request = SealedRequest::new(function, id, sender)
+    .with_parameter("data", large_payload)
+    .seal(vec![&receiver1, &receiver2], sender_keys)?;
+
+// 2. Hubert GSTP convenience detects size > DHT limit
+// 3. Stores actual GSTP message in IPFS with reference_arid
+// 4. Creates GSTP-wrapped reference:
+//    - Plain reference envelope with reference_arid
+//    - Wrapped in new SealedRequest (same sender, same receivers)
+//    - Stores GSTP-wrapped reference in DHT
+
+// 5. Recipient retrieves from DHT
+let envelope = hybrid_kv.get_gstp(&arid, options).await?;
+
+// 6. Hubert GSTP convenience detects GSTP-wrapped reference
+//    - Decrypts with receiver keys (fails if not recipient)
+//    - Extracts reference_arid
+//    - Retrieves actual GSTP message from IPFS
+//    - Returns actual GSTP message to recipient
+
+// 7. Attacker who intercepts ARID:
+//    - Can retrieve GSTP-wrapped reference from DHT
+//    - Cannot decrypt reference (not a recipient)
+//    - Cannot determine reference_arid
+//    - Cannot retrieve IPFS content
+```
+
+**Security Properties:**
+- **Confidentiality**: Reference ARID hidden via encryption
+- **Access Control**: Only recipients can follow indirection
+- **Integrity**: Tampering with reference detected via signature
+- **Non-Repudiation**: Sender signed both reference and payload
+- **Consistency**: Same security level for both DHT and IPFS layers
+
+### 5.7 Testing Strategy
 
 **GSTP Integration Tests:**
 - Create SealedRequest, store, retrieve, unseal roundtrip
@@ -1275,7 +1449,7 @@ Recommended order:
    - Document and test
 
 3. **Hybrid KV** (combines DHT and IPFS)
-   - Build reference envelope infrastructure
+   - Build reference envelope infrastructure (plain)
    - Implement size-based routing logic
    - Implement put operation (DHT or DHT+IPFS)
    - Implement get operation with indirection handling
@@ -1290,7 +1464,17 @@ Recommended order:
    - Multi-recipient encryption examples
    - Test GSTP with all storage layers (DHT, IPFS, Hybrid)
 
-5. **Unified Interface** (optional)
+5. **GSTP + Hybrid Enhanced Security**
+   - Implement GSTP-wrapped reference envelope creation
+   - Detect GSTP messages in Hybrid put operation
+   - Extract GSTP context (sender, recipients, request ID)
+   - Wrap plain references in GSTP messages
+   - Implement GSTP-aware get operation (decrypt wrapped references)
+   - Test GSTP-wrapped reference roundtrip
+   - Test access control (non-recipients cannot follow indirection)
+   - Document GSTP + Hybrid security benefits
+
+6. **Unified Interface** (optional)
    - Define common traits
    - Implement backend abstraction
    - Add backend-specific configuration
@@ -1336,7 +1520,7 @@ Recommended order:
 - [ ] Small envelope roundtrip (DHT-only path, <1000 bytes)
 - [ ] Large envelope roundtrip (Hybrid path, >1000 bytes)
 - [ ] Boundary condition (exactly 1000 bytes)
-- [ ] Reference envelope creation and parsing
+- [ ] Reference envelope creation and parsing (plain)
 - [ ] Reference ARID extraction
 - [ ] Missing IPFS reference error handling
 - [ ] AlreadyExists on DHT layer
@@ -1344,7 +1528,13 @@ Recommended order:
 - [ ] Storage info API (check DHT vs Hybrid)
 - [ ] Force IPFS option (bypass DHT for small envelopes)
 - [ ] **GSTP with Hybrid**: Small GSTP message (DHT-only)
-- [ ] **GSTP with Hybrid**: Large GSTP message (DHT+IPFS)
+- [ ] **GSTP with Hybrid**: Large GSTP message (plain reference + IPFS)
+- [ ] **GSTP-wrapped reference**: Large GSTP creates GSTP-wrapped reference
+- [ ] **GSTP access control**: Only recipients can decrypt reference ARID
+- [ ] **GSTP access control**: Non-recipient cannot follow indirection
+- [ ] **GSTP integrity**: Tampered GSTP-wrapped reference fails verification
+- [ ] **GSTP consistency**: Reference has same sender/recipients as payload
+- [ ] **GSTP multi-recipient**: All recipients can decrypt and follow reference
 
 ### 7.4 Integration Tests
 
@@ -1354,6 +1544,7 @@ Recommended order:
 - [ ] Error handling consistency across backends
 - [ ] **GSTP cross-backend**: Store on DHT, retrieve on IPFS (same envelope)
 - [ ] **GSTP cross-backend**: Store on Hybrid, retrieve on underlying layer
+- [ ] **GSTP security**: GSTP-wrapped reference only accessible to recipients
 
 ---
 
