@@ -48,13 +48,24 @@ This document outlines architectures and implementation plans for using BitTorre
 - Serialization: `envelope.tagged_cbor().to_cbor_data()` → bytes
 - Deserialization: `Envelope::try_from_cbor_data(bytes)` → envelope
 
+**GSTP Message Pattern (Common Use Case):**
+- Primary use case: storing GSTP (Gordian Sealed Transaction Protocol) messages
+- GSTP messages are Envelopes containing encrypted/signed requests, responses, or events
+- GSTP provides encryption to receivers and authentication of senders
+- GSTP supports Encrypted State Continuations (ESC) for stateless operation
+- Storage layers (DHT/IPFS) do NOT need additional encryption or authentication
+- Values already encrypted by GSTP are opaque to storage network
+- ARID serves as lookup key; GSTP handles all confidentiality and integrity
+- Pattern: `SealedRequest`/`SealedResponse`/`SealedEvent` → Envelope → serialize → store
+
 **Key Distribution Model:**
 - Putter generates/chooses an ARID
-- Putter creates Envelope with data
-- Putter writes envelope once to DHT/IPFS using ARID
+- Putter creates GSTP message (encrypted Envelope with data)
+- Putter writes GSTP envelope once to DHT/IPFS using ARID
 - Putter shares ARID with getters (QR code, envelope, secure channel, etc.)
-- Getters use same ARID to derive identical storage key and retrieve envelope
-- ARID acts as cryptographic capability for read access
+- Getters use same ARID to derive identical storage key and retrieve GSTP envelope
+- Getters decrypt GSTP message using their private keys (if they are recipients)
+- ARID acts as public lookup capability; GSTP encryption provides access control
 
 ## 1. BitTorrent Mainline DHT Key-Value Store
 
@@ -331,14 +342,22 @@ Based on existing tests:
 ### 1.4 Security & Operational Considerations
 
 **Privacy:**
-- All DHT operations are public (visible to network participants)
-- Keys and values are not encrypted by default
-- Consider application-layer encryption for sensitive data
-- ARID acts as capability token - anyone with ARID can read
+- DHT operations and values are visible to network participants
+- **GSTP Pattern**: Messages encrypted at application layer (GSTP)
+  - SealedRequest/Response/Event provide receiver encryption
+  - Only intended recipients can decrypt GSTP message content
+  - DHT sees only opaque encrypted envelope bytes
+- **Non-GSTP Pattern**: Envelopes not encrypted by default
+  - Use envelope `.encrypt()` method for application-layer encryption
+  - ARID acts as lookup capability - anyone with ARID can retrieve envelope
 
 **Authentication:**
-- ed25519 signatures prevent unauthorized writes
+- ed25519 signatures prevent unauthorized writes at DHT level
 - Only holder of ARID can write to derived key location
+- **GSTP Pattern**: Sender authentication via GSTP signatures
+  - SealedRequest/Response include sender's XID and signature
+  - Recipients verify sender identity via GSTP verification
+- **Non-GSTP Pattern**: Use envelope `.add_signature()` for authentication
 - Write-once prevents tampering after publication
 
 **Durability:**
@@ -355,8 +374,10 @@ Based on existing tests:
 
 **Key Distribution:**
 - ARID must be shared out-of-band (QR, envelope, secure channel)
-- ARID holder can read value
-- ARID acts as read capability
+- ARID holder can retrieve envelope
+- **GSTP Pattern**: ARID is public lookup; GSTP encryption controls access
+  - Only recipients with correct private keys can decrypt content
+- **Non-GSTP Pattern**: ARID acts as read capability (bearer token)
 - No write capability distribution needed (write-once)
 
 ---
@@ -669,12 +690,21 @@ Based on existing tests:
 - Content is public and discoverable by CID
 - IPNS names are public (peer IDs)
 - DHT lookups are visible to network
-- Consider encrypting values at application layer
-- ARID acts as capability token - anyone with ARID can read
+- **GSTP Pattern**: Messages encrypted at application layer (GSTP)
+  - SealedRequest/Response/Event provide receiver encryption
+  - Only intended recipients can decrypt GSTP message content
+  - IPFS sees only opaque encrypted envelope bytes
+- **Non-GSTP Pattern**: Envelopes not encrypted by default
+  - Use envelope `.encrypt()` method for application-layer encryption
+  - ARID acts as lookup capability - anyone with ARID can retrieve envelope
 
 **Authentication:**
 - IPNS updates authenticated via ed25519 signatures
 - Only holder of ARID can write to derived IPNS name
+- **GSTP Pattern**: Sender authentication via GSTP signatures
+  - SealedRequest/Response include sender's XID and signature
+  - Recipients verify sender identity via GSTP verification
+- **Non-GSTP Pattern**: Use envelope `.add_signature()` for authentication
 - CID immutability provides integrity
 - Write-once prevents tampering after publication
 
@@ -698,8 +728,10 @@ Based on existing tests:
 
 **Key Distribution:**
 - ARID must be shared out-of-band (QR, envelope, secure channel)
-- ARID holder can read value
-- ARID acts as read capability
+- ARID holder can retrieve envelope
+- **GSTP Pattern**: ARID is public lookup; GSTP encryption controls access
+  - Only recipients with correct private keys can decrypt content
+- **Non-GSTP Pattern**: ARID acts as read capability (bearer token)
 - No write capability distribution needed (write-once)
 
 ---
@@ -765,25 +797,164 @@ impl HubertKv {
 
 ---
 
-## 4. Implementation Sequencing
+## 4. GSTP Integration
+
+### 4.1 Overview
+
+The primary use case for Hubert is storing GSTP (Gordian Sealed Transaction Protocol) messages. GSTP provides application-layer encryption, sender authentication, and Encrypted State Continuations (ESC), eliminating the need for storage-layer security.
+
+### 4.2 GSTP Message Types
+
+```rust
+use gstp::prelude::*;
+use bc_components::ARID;
+use bc_xid::XIDDocument;
+use bc_envelope::Envelope;
+
+// Request pattern
+let request = SealedRequest::new(function, request_id, sender_xid)
+    .with_parameter("data", value)
+    .seal(vec![&receiver_xid], sender_keys)?;
+
+let envelope: Envelope = request.into();
+
+// Response pattern
+let response = SealedResponse::new(request_id, result)
+    .seal(vec![&requester_xid], responder_keys)?;
+
+let envelope: Envelope = response.into();
+
+// Event pattern (broadcast)
+let event = SealedEvent::new(function, event_id, sender_xid)
+    .with_parameter("message", notification)
+    .seal(vec![&recipient1, &recipient2], sender_keys)?;
+
+let envelope: Envelope = event.into();
+```
+
+### 4.3 GSTP Storage Pattern
+
+**Typical Flow:**
+1. **Create**: Putter creates GSTP message (SealedRequest/Response/Event)
+2. **Seal**: Message is encrypted to recipient(s) and signed by sender
+3. **Convert**: GSTP message converts to Envelope
+4. **Store**: Envelope serialized and stored in DHT/IPFS with ARID
+5. **Retrieve**: Getter uses ARID to retrieve envelope
+6. **Parse**: Envelope parsed back to GSTP message
+7. **Unseal**: Recipient decrypts with their private key
+8. **Verify**: Recipient verifies sender's signature
+
+**Key Benefits:**
+- **No Storage Encryption**: GSTP encrypts before storage
+- **No Storage Authentication**: GSTP signs before storage
+- **Stateless via ESC**: Encrypted State Continuations embedded in messages
+- **Multi-Recipient**: Single message encrypted to multiple recipients
+- **Public Lookup**: ARID can be shared publicly; only recipients can decrypt
+
+### 4.4 Encrypted State Continuations (ESC)
+
+GSTP's ESC feature enables stateless operation:
+
+```rust
+// Request with state continuation
+let state = Continuation::new(session_data)
+    .with_valid_id(request_id)
+    .with_valid_duration(Duration::from_secs(3600));
+
+let request = SealedRequest::new(function, request_id, sender)
+    .with_state(state)  // Self-encrypted state
+    .seal(recipients, keys)?;
+
+// Responder returns continuation unmodified
+let response = SealedResponse::new(request_id, result)
+    .with_continuation(request.continuation()?)  // Pass through
+    .seal(vec![&requester], keys)?;
+
+// Requester retrieves and validates continuation
+let continuation = response.continuation()?;
+let session_data = continuation.decrypt(requester_keys)?;
+```
+
+**ESC Benefits:**
+- Eliminates server-side session storage
+- Enables horizontal scaling (any server can handle any request)
+- Prevents replay attacks via request ID and timeout
+- Perfect fit for write-once DHT/IPFS storage
+
+### 4.5 API Considerations
+
+Hubert may provide convenience methods for GSTP:
+
+```rust
+// Optional convenience API (if implemented)
+impl MainlineDhtKv {
+    /// Store GSTP message directly
+    pub async fn put_gstp(
+        &self,
+        arid: &ARID,
+        gstp_message: impl Into<Envelope>,
+        options: PutOptions,
+    ) -> Result<PutReceipt, PutError> {
+        let envelope = gstp_message.into();
+        self.put(arid, &envelope, options).await
+    }
+
+    /// Retrieve and parse as GSTP envelope
+    pub async fn get_gstp(
+        &self,
+        arid: &ARID,
+        options: GetOptions,
+    ) -> Result<Option<Envelope>, GetError> {
+        self.get(arid, options).await
+    }
+}
+```
+
+**Note**: The core API already handles Envelopes, so GSTP integration is primarily about documentation and example patterns rather than new API surface.
+
+### 4.6 Testing Strategy
+
+**GSTP Integration Tests:**
+- Create SealedRequest, store, retrieve, unseal roundtrip
+- Multi-recipient encryption (multiple recipients can decrypt)
+- Sender signature verification
+- Continuation roundtrip (store, retrieve, decrypt state)
+- Invalid recipient cannot decrypt
+- Tampered message fails signature verification
+- Expired continuation rejected
+
+---
+
+## 5. Implementation Sequencing
 
 Recommended order:
 
 1. **Mainline DHT KV** (simpler, fewer dependencies)
    - Leverage existing test patterns
-   - Build key derivation module
-   - Implement basic put/get
-   - Add CAS semantics
+   - Build ARID derivation module
+   - Build envelope serialization module
+   - Implement basic put/get with envelopes
+   - Add write-once enforcement (AlreadyExists errors)
    - Document and test
 
 2. **IPFS KV** (more complex, daemon-dependent)
    - Leverage existing IPNS test patterns
+   - Build ARID derivation module
+   - Build envelope serialization module
+   - Implement IPNS-based put/get with envelopes
+   - Add write-once enforcement
    - Build key cache system
-   - Implement IPNS-based put/get
    - Add pinning lifecycle
    - Document and test
 
-3. **Unified Interface** (optional)
+3. **GSTP Integration Examples**
+   - Add GSTP dependency
+   - Create example tests with SealedRequest/Response/Event
+   - Document GSTP storage patterns
+   - Show ESC (Encrypted State Continuation) usage
+   - Multi-recipient encryption examples
+
+4. **Unified Interface** (optional)
    - Define common traits
    - Implement backend abstraction
    - Add backend-specific configuration
@@ -791,21 +962,24 @@ Recommended order:
 
 ---
 
-## 5. Testing Requirements
+## 6. Testing Requirements
 
-### 5.1 Mainline DHT Tests
+### 6.1 Mainline DHT Tests
 
 - [ ] Basic ARID-based write-once put/get roundtrip (testnet)
 - [ ] Basic ARID-based write-once put/get roundtrip (mainnet, ignored)
 - [ ] ARID derivation determinism (same ARID → same signing key)
 - [ ] HKDF salt variation (different salts → different keys)
 - [ ] AlreadyExists error on duplicate put attempt
-- [ ] Size limit enforcement
-- [ ] Exists check (without fetching value)
+- [ ] Envelope size limit enforcement
+- [ ] Exists check (without fetching envelope)
 - [ ] Polling timeout behavior
 - [ ] Network partition recovery
+- [ ] **GSTP roundtrip**: SealedRequest store/retrieve/unseal
+- [ ] **GSTP multi-recipient**: Multiple recipients can decrypt
+- [ ] **GSTP continuation**: ESC roundtrip with state
 
-### 5.2 IPFS Tests
+### 6.2 IPFS Tests
 
 - [ ] Basic ARID-based write-once put/get roundtrip (immutable)
 - [ ] Basic ARID-based write-once put/get roundtrip (IPNS mutable)
@@ -813,18 +987,21 @@ Recommended order:
 - [ ] HKDF salt variation (different salts → different peer IDs)
 - [ ] AlreadyExists error on duplicate IPNS publish
 - [ ] Key cache hit/miss
-- [ ] Large value handling (>1 MB)
+- [ ] Large envelope handling (>1 MB)
 - [ ] Pin lifecycle (add once, verify pinned)
-- [ ] Exists check (without fetching value)
+- [ ] Exists check (without fetching envelope)
 - [ ] Daemon connection failure handling
 - [ ] IPNS resolution timeout
+- [ ] **GSTP roundtrip**: SealedResponse store/retrieve/unseal
+- [ ] **GSTP event**: SealedEvent broadcast to multiple recipients
 
-### 5.3 Integration Tests
+### 6.3 Integration Tests
 
 - [ ] Backend switching (same ARID interface)
 - [ ] Performance benchmarks (latency, throughput)
 - [ ] Concurrent readers (same ARID, multiple getters)
 - [ ] Error handling consistency across backends
+- [ ] **GSTP cross-backend**: Store on DHT, retrieve on IPFS (same envelope)
 
 ---
 
@@ -916,13 +1093,23 @@ fn derive_ipfs_key_name(arid: &ARID) -> String {
 **Network Visibility:**
 - Public keys are visible on DHT/IPFS networks
 - ARID itself is NOT published (only derived public keys)
-- Values are public unless application-layer encrypted
+- Envelope bytes are visible to network (opaque binary data)
+- **GSTP Pattern**: Encrypted GSTP messages are opaque to network
+  - Network sees encrypted envelope but cannot read content
+  - Only recipients with correct keys can decrypt
+  - Sender/receiver metadata not exposed at network level
+- **Non-GSTP Pattern**: Unencrypted envelopes visible to network
+  - Use envelope `.encrypt()` for confidentiality
 - IPNS names and CIDs are discoverable
 
 **Key Distribution:**
 - ARID distribution is out-of-band (application responsibility)
-- ARID acts as read capability (bearer token)
-- Secure channel recommended for ARID sharing (Signal, envelope, QR)
+- **GSTP Pattern**: ARID is public lookup capability
+  - Share ARID via any channel (even public)
+  - GSTP encryption controls who can read content
+  - Access control via GSTP recipient keys, not ARID secrecy
+- **Non-GSTP Pattern**: ARID acts as read capability (bearer token)
+  - Secure channel recommended for ARID sharing (Signal, envelope, QR)
 - No need to distribute signing keys (write-once)
 
 ---
@@ -950,6 +1137,20 @@ When implementing:
 - Review `bc_envelope` API, especially `queries.rs` for data extraction
 - Use `Envelope::new()`, `.add_assertion()`, `.subject()`, etc.
 
+**GSTP Integration (Primary Use Case):**
+- Add `gstp` crate as dependency in Cargo.toml
+- GSTP messages are the expected envelope format for most use cases
+- GSTP types: `SealedRequest`, `SealedResponse`, `SealedEvent`
+- GSTP provides built-in encryption and sender authentication
+- GSTP supports Encrypted State Continuations (ESC) for stateless protocols
+- Storage layer does NOT need to handle encryption/authentication
+- Pattern: Create GSTP message → convert to Envelope → serialize → store
+- Example: `sealed_request.to_envelope()` → store with ARID
+- Recipients retrieve envelope → parse as GSTP → decrypt with their keys
+- ARID serves as public lookup; GSTP handles access control
+- Review `gstp` crate API for SealedRequest/Response/Event creation
+- Hubert API may provide convenience methods for GSTP messages
+
 **Error Handling:**
 - **Public API**: Use `thiserror::Error` derive macro for all error types
 - **Tests only**: Use `anyhow::Result` (dev-dependency only)
@@ -963,6 +1164,7 @@ When implementing:
 **Implementation Guidelines:**
 - Start with immutable storage tests as foundation
 - Build write-once mutable storage on top (both DHT and IPNS)
+- Consider GSTP integration tests with encrypted messages
 - Validate ARID input before any network operations
 - Serialize envelope and validate size before network operations
 - Implement polling with exponential backoff for gets
@@ -970,6 +1172,7 @@ When implementing:
 - Provide clear error messages via thiserror error strings
 - Follow existing test patterns (testnet + ignored mainnet)
 - Document write-once semantics prominently in all API docs
+- Document GSTP integration pattern in API docs
 - Document envelope serialization format in API docs
 - Document error types with examples in rustdoc
 - Document ARID-to-key derivation in module docs
