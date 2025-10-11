@@ -1,9 +1,12 @@
 use anyhow::Result;
+use futures_util::TryStreamExt;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
 use ipfs_api_prelude::request::KeyType;
-use futures_util::TryStreamExt;
-use std::{io::Cursor, time::{SystemTime, UNIX_EPOCH}};
-use tokio::time::{sleep, Duration, Instant};
+use std::{
+    io::Cursor,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::time::{Duration, Instant, sleep};
 
 // This uses IPNS as the mutable name. It:
 // 1. Generates a fresh ed25519 IPNS key,
@@ -44,12 +47,11 @@ async fn ipns_mutable_roundtrip() -> Result<()> {
     let peer_id = key_info.id; // the /ipns/<peer_id> name for this key
 
     // === Publish CID A to IPNS using that key ===
-    // name_publish(path, resolve, lifetime, ttl, key, allow_offline)
+    // name_publish(path, resolve, lifetime, ttl, key)
     // - resolve=false: don’t try to resolve input path
     // - lifetime=None: default Kubo lifetime (24h)
     // - ttl=None: no explicit TTL hint
     // - key=Some(&key_name): use our generated key
-    // - allow_offline=true: permit local publish even if not fully connected
     let _pub_a = client
         .name_publish(
             &format!("/ipfs/{}", cid_a),
@@ -79,7 +81,10 @@ async fn ipns_mutable_roundtrip() -> Result<()> {
             break;
         }
         if Instant::now() >= deadline {
-            panic!("IPNS did not resolve to CID A within timeout; got {}", res.path);
+            panic!(
+                "IPNS did not resolve to CID A within timeout; got {}",
+                res.path
+            );
         }
         sleep(Duration::from_millis(250)).await;
     }
@@ -100,15 +105,16 @@ async fn ipns_mutable_roundtrip() -> Result<()> {
     let expect_path_b = format!("/ipfs/{}", cid_b);
     let deadline2 = Instant::now() + Duration::from_secs(10);
     loop {
-        let res = client
-            .name_resolve(Some(&peer_id), false, false)
-            .await?;
+        let res = client.name_resolve(Some(&peer_id), false, true).await?;
 
         if res.path == expect_path_b {
             break;
         }
         if Instant::now() >= deadline2 {
-            panic!("IPNS did not advance to CID B within timeout; got {}", res.path);
+            panic!(
+                "IPNS did not advance to CID B within timeout; got {}",
+                res.path
+            );
         }
         sleep(Duration::from_millis(250)).await;
     }
