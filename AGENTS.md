@@ -736,9 +736,332 @@ Based on existing tests:
 
 ---
 
-## 3. Unified API Considerations
+## 3. Hybrid Storage Layer (DHT with IPFS Fallback)
 
-### 3.1 Common Traits
+### 3.1 Architecture
+
+The Hybrid storage layer combines DHT and IPFS to optimize for both speed and capacity:
+
+**Strategy:**
+- **Small envelopes (≤1000 bytes)**: Store directly in DHT
+- **Large envelopes (>1000 bytes)**: Store reference envelope in DHT, actual envelope in IPFS
+- **Transparent to caller**: API handles indirection automatically
+
+**Reference Envelope Format:**
+```
+'' [                            // Unit subject (empty)
+    'isA': "ipfs-reference",    // Known value indicating indirection
+    'id': <ARID>,               // New ARID for IPFS lookup
+    'size': <usize>             // Size of actual envelope (optional, for diagnostics)
+]
+```
+
+### 3.2 Put Operation Flow
+
+```
+1. Serialize target envelope to dCBOR
+2. Check serialized size
+3. IF size ≤ DHT_LIMIT (1000 bytes):
+     - Store envelope directly in DHT using original ARID
+     - Return receipt with DHT-only indicator
+   ELSE:
+     - Generate new ARID (reference_arid) for IPFS storage
+     - Create reference envelope with reference_arid
+     - Store reference envelope in DHT using original ARID
+     - Store actual envelope in IPFS using reference_arid
+     - Return receipt with hybrid indicator (DHT + IPFS)
+```
+
+### 3.3 Get Operation Flow
+
+```
+1. Retrieve envelope from DHT using ARID
+2. Check if envelope is reference envelope
+3. IF reference envelope:
+     - Extract reference_arid from assertions
+     - Retrieve actual envelope from IPFS using reference_arid
+     - Return actual envelope
+   ELSE:
+     - Return DHT envelope directly
+```
+
+### 3.4 API Design
+
+```rust
+use bc_components::ARID;
+use bc_envelope::Envelope;
+
+pub struct HybridKv {
+    dht: MainlineDhtKv,
+    ipfs: IpfsKv,
+    dht_size_limit: usize,  // Default: 1000 bytes
+}
+
+pub struct PutOptions {
+    /// Timeout for put operation
+    pub timeout: Duration,
+    /// Force IPFS storage even for small envelopes
+    pub force_ipfs: bool,
+    /// Whether to pin IPFS content
+    pub pin: bool,
+}
+
+pub struct GetOptions {
+    /// Poll timeout for DHT
+    pub dht_timeout: Duration,
+    /// Poll timeout for IPFS resolution (if needed)
+    pub ipfs_timeout: Duration,
+    /// Interval between poll attempts
+    pub poll_interval: Duration,
+}
+
+impl HybridKv {
+    /// Create a new Hybrid KV store
+    pub fn new(dht: MainlineDhtKv, ipfs: IpfsKv) -> Self;
+
+    /// Create with custom DHT size limit
+    pub fn with_size_limit(
+        dht: MainlineDhtKv,
+        ipfs: IpfsKv,
+        dht_size_limit: usize,
+    ) -> Self;
+
+    /// Put envelope with ARID-based key (write-once)
+    /// Automatically uses DHT or DHT+IPFS based on size
+    pub async fn put(
+        &self,
+        arid: &ARID,
+        envelope: &Envelope,
+        options: PutOptions,
+    ) -> Result<PutReceipt, PutError>;
+
+    /// Get envelope for ARID-based key
+    /// Automatically handles DHT-only or DHT+IPFS indirection
+    pub async fn get(
+        &self,
+        arid: &ARID,
+        options: GetOptions,
+    ) -> Result<Option<Envelope>, GetError>;
+
+    /// Check if ARID key exists (checks DHT only)
+    pub async fn exists(
+        &self,
+        arid: &ARID,
+        options: GetOptions,
+    ) -> Result<bool, GetError>;
+
+    /// Check storage location for diagnostic purposes
+    pub async fn storage_info(
+        &self,
+        arid: &ARID,
+    ) -> Result<Option<StorageInfo>, GetError>;
+}
+
+pub struct PutReceipt {
+    pub arid: ARID,
+    pub storage: StorageLocation,
+    pub envelope_size: usize,
+}
+
+pub enum StorageLocation {
+    /// Stored directly in DHT
+    DhtOnly {
+        target_id: mainline::Id,
+    },
+    /// Stored as reference in DHT, actual data in IPFS
+    Hybrid {
+        dht_target_id: mainline::Id,
+        reference_arid: ARID,
+        ipfs_cid: String,
+        ipfs_name: String,
+    },
+}
+
+pub struct StorageInfo {
+    pub location: StorageLocation,
+    pub is_reference: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PutError {
+    #[error("ARID already exists")]
+    AlreadyExists,
+
+    #[error("DHT error: {0}")]
+    DhtError(#[from] super::mainline::PutError),
+
+    #[error("IPFS error: {0}")]
+    IpfsError(#[from] super::ipfs::PutError),
+
+    #[error("Reference envelope creation failed: {0}")]
+    ReferenceCreationError(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GetError {
+    #[error("DHT error: {0}")]
+    DhtError(#[from] super::mainline::GetError),
+
+    #[error("IPFS error: {0}")]
+    IpfsError(#[from] super::ipfs::GetError),
+
+    #[error("Invalid reference envelope: {0}")]
+    InvalidReference(String),
+
+    #[error("Reference ARID not found in IPFS")]
+    ReferenceNotFound,
+}
+```
+
+### 3.5 Reference Envelope Details
+
+**Known Value for Reference:**
+```rust
+// Define a known value to identify reference envelopes
+const IPFS_REFERENCE: &str = "ipfs-reference";
+
+// Creating reference envelope
+fn create_reference_envelope(
+    reference_arid: &ARID,
+    actual_size: usize,
+) -> Envelope {
+    Envelope::new(IPFS_REFERENCE)
+        .add_assertion("arid", reference_arid)
+        .add_assertion("size", actual_size)
+}
+
+// Detecting reference envelope
+fn is_reference_envelope(envelope: &Envelope) -> bool {
+    envelope.extract_subject::<String>()
+        .map(|s| s == IPFS_REFERENCE)
+        .unwrap_or(false)
+}
+
+// Extracting reference ARID
+fn extract_reference_arid(envelope: &Envelope) -> Result<ARID> {
+    envelope.extract_object_for_predicate("arid")
+}
+```
+
+### 3.6 Implementation Plan
+
+#### Phase 1: Reference Envelope Infrastructure
+
+1. **Reference Envelope Module** (`hybrid/reference.rs`)
+   - Define reference envelope format
+   - Create reference envelope builder
+   - Parse and validate reference envelopes
+   - Extract reference ARID from reference envelope
+   - Unit tests for reference envelope operations
+
+2. **Size Estimation** (`hybrid/sizing.rs`)
+   - Accurate dCBOR size calculation
+   - Bencode overhead estimation for DHT
+   - Helper to determine if envelope fits in DHT
+   - Include reference envelope overhead in calculations
+
+#### Phase 2: Hybrid Put/Get Operations
+
+3. **Put Implementation** (`hybrid/put.rs`)
+   - Serialize and measure envelope size
+   - Decision logic: DHT-only vs Hybrid
+   - **DHT-only path**: Direct storage in DHT
+   - **Hybrid path**:
+     - Generate new ARID for IPFS
+     - Create reference envelope
+     - Store reference in DHT
+     - Store actual envelope in IPFS
+   - Return appropriate PutReceipt with location info
+   - Handle AlreadyExists from both layers
+
+4. **Get Implementation** (`hybrid/get.rs`)
+   - Retrieve envelope from DHT
+   - Check if reference envelope
+   - **Direct path**: Return DHT envelope
+   - **Hybrid path**:
+     - Extract reference ARID
+     - Retrieve from IPFS using reference ARID
+     - Return actual envelope
+   - Handle missing references gracefully
+
+5. **Exists Check** (`hybrid/exists.rs`)
+   - Check DHT only (references count as existing)
+   - Optional: verify IPFS reference is retrievable
+
+#### Phase 3: Error Handling & Validation
+
+6. **Error Types** (`hybrid/error.rs`)
+   - `PutError` with DHT and IPFS variants
+   - `GetError` with reference-specific errors
+   - InvalidReference for malformed reference envelopes
+   - ReferenceNotFound for missing IPFS content
+   - Proper error conversion from underlying layers
+
+7. **Storage Info** (`hybrid/info.rs`)
+   - Diagnostic API to check storage location
+   - Return whether envelope is reference or direct
+   - Include size and location metadata
+
+#### Phase 4: Testing & Documentation
+
+8. **Integration Tests**
+   - Small envelope roundtrip (DHT-only path)
+   - Large envelope roundtrip (Hybrid path)
+   - Reference envelope parsing
+   - Missing reference handling
+   - AlreadyExists with both DHT and IPFS
+   - Size boundary conditions (exactly at limit)
+
+9. **Documentation**
+   - Hybrid storage strategy explained
+   - When DHT vs IPFS is used
+   - Reference envelope format specification
+   - Performance characteristics
+   - Troubleshooting missing references
+
+### 3.7 Size Limits & Tradeoffs
+
+**DHT Size Limit:**
+- Conservative: 1000 bytes serialized dCBOR
+- Reference envelope overhead: ~100 bytes
+- Effective payload for hybrid: ~900 bytes leaves room for reference
+
+**Decision Points:**
+- Envelope < 1000 bytes → DHT-only (optimal: fast, no dependencies)
+- Envelope ≥ 1000 bytes → Hybrid (DHT reference + IPFS storage)
+
+**Tradeoffs:**
+| Aspect        | DHT-Only                 | Hybrid (DHT + IPFS)           |
+| ------------- | ------------------------ | ----------------------------- |
+| Latency       | 100ms-5s (single lookup) | 100ms-5s (DHT) + 1-10s (IPFS) |
+| Size limit    | 1 KB                     | ~10 MB (practical)            |
+| Dependencies  | None                     | Kubo daemon                   |
+| Durability    | Hours-days               | Requires pinning              |
+| Complexity    | Simple                   | Two-layer indirection         |
+| Failure modes | DHT unavailable          | DHT or IPFS unavailable       |
+
+### 3.8 Operational Considerations
+
+**Consistency:**
+- Reference envelope and IPFS content written atomically (from caller perspective)
+- If IPFS write fails, DHT write is not attempted
+- AlreadyExists checked on both layers
+
+**Garbage Collection:**
+- IPFS content requires pinning
+- Unpinned IPFS references become dangling
+- No automatic cleanup of IPFS content when DHT expires
+
+**Failure Recovery:**
+- Missing IPFS reference returns `ReferenceNotFound` error
+- Caller can retry put operation with new ARID
+- Consider external monitoring for dangling references
+
+---
+
+## 4. Unified API Considerations
+
+### 4.1 Common Traits
 
 Both implementations use ARID-based write-once keys with Envelope values and implement shared traits:
 
@@ -755,12 +1078,13 @@ pub trait KvStore: Send + Sync {
     async fn exists(&self, arid: &ARID) -> Result<bool, Box<dyn std::error::Error>>;
 }
 
-// Mainline and IPFS each implement this trait
+// Mainline, IPFS, and Hybrid each implement this trait
 impl KvStore for MainlineDhtKv { /* ... */ }
 impl KvStore for IpfsKv { /* ... */ }
+impl KvStore for HybridKv { /* ... */ }
 ```
 
-### 3.2 Abstraction Layers
+### 4.2 Abstraction Layers
 
 Potential unified interface:
 
@@ -780,26 +1104,29 @@ impl HubertKv {
 }
 ```
 
-### 3.3 Tradeoffs Summary
+### 4.3 Tradeoffs Summary
 
-| Feature         | Mainline DHT           | IPFS                               |
-| --------------- | ---------------------- | ---------------------------------- |
-| Max value size  | ~1 KB                  | ~1-10 MB (practical)               |
-| Get latency     | 100ms-5s               | 1-10s (IPNS), 10ms-1s (immutable)  |
-| Put latency     | 1-5s                   | 10ms-1s (add), 1-5s (IPNS publish) |
-| Write semantics | Write-once (seq=1)     | Write-once (IPNS publish once)     |
-| Durability      | Temporary (hours-days) | Requires pinning                   |
-| Dependencies    | None (pure DHT)        | Kubo daemon                        |
-| Network usage   | UDP                    | TCP/QUIC/WebSocket                 |
-| Privacy         | Public                 | Public                             |
-| Auth model      | ed25519 signatures     | ed25519 signatures (IPNS)          |
-| ARID capability | Read-only (via ARID)   | Read-only (via ARID)               |
+| Feature         | Mainline DHT           | IPFS                               | Hybrid (DHT + IPFS)              |
+| --------------- | ---------------------- | ---------------------------------- | -------------------------------- |
+| Max value size  | ~1 KB                  | ~1-10 MB (practical)               | ~1-10 MB (automatic fallback)    |
+| Get latency     | 100ms-5s               | 1-10s (IPNS), 10ms-1s (immutable)  | 100ms-5s (small), 1-15s (large)  |
+| Put latency     | 1-5s                   | 10ms-1s (add), 1-5s (IPNS publish) | 1-5s (small), 2-10s (large)      |
+| Write semantics | Write-once (seq=1)     | Write-once (IPNS publish once)     | Write-once (both layers)         |
+| Durability      | Temporary (hours-days) | Requires pinning                   | DHT temporary, IPFS pinned       |
+| Dependencies    | None (pure DHT)        | Kubo daemon                        | Kubo daemon (for large values)   |
+| Network usage   | UDP                    | TCP/QUIC/WebSocket                 | UDP + TCP/QUIC (when needed)     |
+| Privacy         | Public                 | Public                             | Public                           |
+| Auth model      | ed25519 signatures     | ed25519 signatures (IPNS)          | ed25519 (both layers)            |
+| ARID capability | Read-only (via ARID)   | Read-only (via ARID)               | Read-only (via ARID)             |
+| Complexity      | Simple                 | Moderate                           | Moderate (two-layer indirection) |
+| Failure modes   | DHT unavailable        | IPFS daemon down                   | DHT or IPFS (for large) down     |
+| **Best for**    | Small, fast lookups    | Large payloads, persistence        | Automatic optimization by size   |
 
 ---
 
-## 4. GSTP Integration
+## 5. GSTP Integration
 
-### 4.1 Overview
+### 5.1 Overview
 
 The primary use case for Hubert is storing GSTP (Gordian Sealed Transaction Protocol) messages. GSTP provides application-layer encryption, sender authentication, and Encrypted State Continuations (ESC), eliminating the need for storage-layer security.
 
@@ -925,7 +1252,7 @@ impl MainlineDhtKv {
 
 ---
 
-## 5. Implementation Sequencing
+## 6. Implementation Sequencing
 
 Recommended order:
 
@@ -947,24 +1274,33 @@ Recommended order:
    - Add pinning lifecycle
    - Document and test
 
-3. **GSTP Integration Examples**
+3. **Hybrid KV** (combines DHT and IPFS)
+   - Build reference envelope infrastructure
+   - Implement size-based routing logic
+   - Implement put operation (DHT or DHT+IPFS)
+   - Implement get operation with indirection handling
+   - Add storage info diagnostics
+   - Document and test
+
+4. **GSTP Integration Examples**
    - Add GSTP dependency
    - Create example tests with SealedRequest/Response/Event
    - Document GSTP storage patterns
    - Show ESC (Encrypted State Continuation) usage
    - Multi-recipient encryption examples
+   - Test GSTP with all storage layers (DHT, IPFS, Hybrid)
 
-4. **Unified Interface** (optional)
+5. **Unified Interface** (optional)
    - Define common traits
    - Implement backend abstraction
    - Add backend-specific configuration
-   - Integration tests across both backends
+   - Integration tests across all backends
 
 ---
 
-## 6. Testing Requirements
+## 7. Testing Requirements
 
-### 6.1 Mainline DHT Tests
+### 7.1 Mainline DHT Tests
 
 - [ ] Basic ARID-based write-once put/get roundtrip (testnet)
 - [ ] Basic ARID-based write-once put/get roundtrip (mainnet, ignored)
@@ -979,7 +1315,7 @@ Recommended order:
 - [ ] **GSTP multi-recipient**: Multiple recipients can decrypt
 - [ ] **GSTP continuation**: ESC roundtrip with state
 
-### 6.2 IPFS Tests
+### 7.2 IPFS Tests
 
 - [ ] Basic ARID-based write-once put/get roundtrip (immutable)
 - [ ] Basic ARID-based write-once put/get roundtrip (IPNS mutable)
@@ -995,31 +1331,48 @@ Recommended order:
 - [ ] **GSTP roundtrip**: SealedResponse store/retrieve/unseal
 - [ ] **GSTP event**: SealedEvent broadcast to multiple recipients
 
-### 6.3 Integration Tests
+### 7.3 Hybrid Tests
+
+- [ ] Small envelope roundtrip (DHT-only path, <1000 bytes)
+- [ ] Large envelope roundtrip (Hybrid path, >1000 bytes)
+- [ ] Boundary condition (exactly 1000 bytes)
+- [ ] Reference envelope creation and parsing
+- [ ] Reference ARID extraction
+- [ ] Missing IPFS reference error handling
+- [ ] AlreadyExists on DHT layer
+- [ ] AlreadyExists on IPFS layer (for large envelopes)
+- [ ] Storage info API (check DHT vs Hybrid)
+- [ ] Force IPFS option (bypass DHT for small envelopes)
+- [ ] **GSTP with Hybrid**: Small GSTP message (DHT-only)
+- [ ] **GSTP with Hybrid**: Large GSTP message (DHT+IPFS)
+
+### 7.4 Integration Tests
 
 - [ ] Backend switching (same ARID interface)
-- [ ] Performance benchmarks (latency, throughput)
+- [ ] Performance benchmarks (latency, throughput) across all backends
 - [ ] Concurrent readers (same ARID, multiple getters)
 - [ ] Error handling consistency across backends
 - [ ] **GSTP cross-backend**: Store on DHT, retrieve on IPFS (same envelope)
+- [ ] **GSTP cross-backend**: Store on Hybrid, retrieve on underlying layer
 
 ---
 
-## 6. Documentation Deliverables
+## 8. Documentation Deliverables
 
-For each API:
+For each API (DHT, IPFS, Hybrid):
 
 1. **API Reference** - Rustdoc with examples
 2. **User Guide** - Setup, usage patterns, best practices
 3. **Security Guide** - Threat model, key management, encryption
-4. **Performance Guide** - Tuning, caching, batch operations
+4. **Performance Guide** - Tuning, caching, size optimization
 5. **Migration Guide** - Switching backends, data portability
+6. **Hybrid Guide** - When to use Hybrid, reference envelope format, troubleshooting
 
 ---
 
-## 7. ARID Key Management
+## 9. ARID Key Management
 
-### 7.1 ARID Properties
+### 9.1 ARID Properties
 
 From `bc_components::ARID`:
 - Fixed 32-byte (256-bit) cryptographically strong identifier
@@ -1028,7 +1381,7 @@ From `bc_components::ARID`:
 - Suitable as input to cryptographic constructs (like HKDF)
 - Stable identifiers for mutable data structures
 
-### 7.2 HKDF Derivation Details
+### 9.2 HKDF Derivation Details
 
 Both backends use HKDF-HMAC-SHA-256 from `bc_crypto`:
 
@@ -1049,9 +1402,12 @@ fn derive_mainline_signing_key(arid: &ARID) -> [u8; 32] {
 fn derive_ipfs_key_name(arid: &ARID) -> String {
     format!("hubert-{}", arid.hex())
 }
+
+// Hybrid uses same derivation as DHT for primary ARID
+// and generates new ARID for IPFS reference when needed
 ```
 
-### 7.3 Salt Management
+### 9.3 Salt Management
 
 **HKDF Salt Purpose:**
 - Domain separation between different applications/versions
@@ -1061,6 +1417,7 @@ fn derive_ipfs_key_name(arid: &ARID) -> String {
 **Default Salts:**
 - Mainline DHT: `b"hubert-mainline-dht-v1"`
 - IPFS IPNS: `b"hubert-ipfs-ipns-v1"`
+- Hybrid: Uses DHT salt for primary, IPFS salt for references
 
 **No DHT Salt (Mainline):**
 - BEP-44 supports optional salt for multiple values per pubkey
@@ -1068,15 +1425,16 @@ fn derive_ipfs_key_name(arid: &ARID) -> String {
 - Single value per ARID simplifies design
 - No namespace management needed
 
-### 7.4 Key Derivation Guarantees
+### 9.4 Key Derivation Guarantees
 
 1. **Determinism**: Same ARID + same HKDF salt → same derived key (always)
 2. **Isolation**: Different HKDF salts → statistically independent keys
 3. **Irreversibility**: Cannot derive ARID from public key or DHT key
 4. **Collision Resistance**: Cryptographic strength inherited from HKDF-HMAC-SHA-256
 5. **Cross-Network Isolation**: Mainline and IPFS keys are independent (different salts)
+6. **Reference ARID Independence**: Hybrid reference ARIDs are independent from primary ARID
 
-### 7.5 Security Considerations
+### 9.5 Security Considerations
 
 **ARID Storage:**
 - Users must securely store their ARIDs to retain write capability
