@@ -6,13 +6,32 @@ use bc_envelope::Envelope;
 use hubert::{KvStore, ipfs::IpfsKv};
 use tokio::sync::mpsc;
 
-/// Test multi-threaded IPFS KV operations with separate put/get threads.
+/// Test multi-threaded IPFS KV operations with concurrent tasks.
 ///
-/// This test demonstrates:
-/// - Thread safety of IpfsKv (Send + Sync)
-/// - Concurrent put operations on thread 1
-/// - Concurrent get operations on thread 2
-/// - Proper coordination via channels
+/// This test demonstrates the thread safety and concurrency model of the
+/// KvStore trait:
+///
+/// **Architecture:**
+/// - Main thread: Generates test data and coordinates
+/// - Thread 1 (Put): Sends ARIDs immediately, then spawns 3 concurrent put
+///   tasks
+/// - Thread 2 (Get): Receives ARIDs, then spawns 3 concurrent polling tasks
+///
+/// **Flow:**
+/// 1. Main thread generates 3 ARIDs and test data
+/// 2. Thread 1 immediately sends all ARIDs to Thread 2 as a single message
+/// 3. Thread 1 spawns 3 concurrent `spawn_local` tasks to put envelopes
+/// 4. Thread 2 receives all ARIDs and spawns 3 concurrent polling tasks
+/// 5. Each polling task retries until its envelope appears (or times out)
+/// 6. Both threads complete when all tasks finish
+/// 7. Main thread verifies all data matches
+///
+/// **Demonstrates:**
+/// - `IpfsKv` is `Send + Sync` (can be shared via `Arc` across threads)
+/// - Futures are `!Send` (use `spawn_local` within each thread's runtime)
+/// - Multiple concurrent operations per thread work correctly
+/// - No data races or synchronization issues
+/// - Proper asynchronous coordination between independent threads
 ///
 /// Requires a local Kubo daemon (default RPC at 127.0.0.1:5001).
 /// Run with: cargo test -q -- --ignored --nocapture ipfs_kv_multithreaded
@@ -32,13 +51,13 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
     // Generate ARIDs
     let arids: Vec<ARID> = (0..3).map(|_| ARID::new()).collect();
 
-    // Channel to send ARIDs from thread 1 to thread 2
-    let (arid_tx, mut arid_rx) = mpsc::channel::<ARID>(10);
+    // Channel to send all ARIDs at once from thread 1 to thread 2
+    let (arid_tx, mut arid_rx) = mpsc::channel::<Vec<ARID>>(1);
 
     // Channel to send results from thread 2 back to main
     let (result_tx, mut result_rx) = mpsc::channel::<(ARID, String)>(10);
 
-    // Thread 1: Put operations
+    // Thread 1: Put operations (concurrent)
     let store1 = Arc::clone(&store);
     let arids_clone = arids.clone();
     let test_data_clone = test_data.clone();
@@ -46,107 +65,165 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
         // Create a tokio runtime for this thread
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            // Immediately send ARIDs to thread 2
-            for arid in &arids_clone {
-                arid_tx.send(*arid).await.unwrap();
-            }
-            drop(arid_tx); // Close channel to signal no more ARIDs
+            // Send all ARIDs at once to thread 2
+            arid_tx.send(arids_clone.clone()).await.unwrap();
+            drop(arid_tx);
 
-            println!("Thread 1: Sent all ARIDs to thread 2");
+            println!(
+                "Thread 1: Sent all {} ARIDs to thread 2",
+                arids_clone.len()
+            );
 
-            // Now perform puts
-            for (i, arid) in arids_clone.iter().enumerate() {
-                let (subject, body) = test_data_clone[i];
-                let envelope =
-                    Envelope::new(subject).add_assertion("body", body);
+            // Create local set for spawn_local tasks
+            let local_set = tokio::task::LocalSet::new();
 
-                println!(
-                    "Thread 1: Putting ARID {} with subject '{}'",
-                    i + 1,
-                    subject
-                );
+            // Spawn concurrent put tasks within the LocalSet
+            local_set
+                .run_until(async {
+                    let mut put_tasks = Vec::new();
+                    for (i, arid) in arids_clone.iter().enumerate() {
+                        let (subject, body) = test_data_clone[i];
+                        let envelope =
+                            Envelope::new(subject).add_assertion("body", body);
+                        let store_ref = Arc::clone(&store1);
+                        let arid_copy = *arid;
 
-                match store1.put(arid, &envelope).await {
-                    Ok(receipt) => {
-                        println!("Thread 1: Put successful - {}", receipt);
+                        let task = tokio::task::spawn_local(async move {
+                            println!(
+                                "Thread 1: Putting ARID {} with subject '{}'",
+                                i + 1,
+                                subject
+                            );
+
+                            match store_ref.put(&arid_copy, &envelope).await {
+                                Ok(receipt) => {
+                                    println!(
+                                        "Thread 1: Put {} successful - {}",
+                                        i + 1,
+                                        receipt
+                                    );
+                                    Ok::<(), anyhow::Error>(())
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Thread 1: Put {} failed - {}",
+                                        i + 1,
+                                        e
+                                    );
+                                    Err(anyhow::anyhow!("Put failed: {}", e))
+                                }
+                            }
+                        });
+                        put_tasks.push(task);
                     }
-                    Err(e) => {
-                        eprintln!("Thread 1: Put failed - {}", e);
-                        return Err::<(), anyhow::Error>(anyhow::anyhow!(
-                            "Put failed: {}",
-                            e
-                        ));
-                    }
-                }
-            }
 
-            println!("Thread 1: Completed all puts");
-            Ok(())
+                    println!(
+                        "Thread 1: Waiting for all {} puts to complete...",
+                        put_tasks.len()
+                    );
+
+                    // Wait for all puts to complete
+                    for (i, task) in put_tasks.into_iter().enumerate() {
+                        task.await.unwrap()?;
+                        println!("Thread 1: Put {} completed", i + 1);
+                    }
+
+                    println!("Thread 1: All puts completed successfully");
+                    Ok::<(), anyhow::Error>(())
+                })
+                .await
         })
     });
 
-    // Thread 2: Get operations
+    // Thread 2: Get operations (concurrent)
     let store2 = Arc::clone(&store);
     let get_handle = thread::spawn(move || {
         // Create a tokio runtime for this thread
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let mut received = Vec::new();
-            let mut arid_count = 0;
-
-            // Receive ARIDs as they arrive
+            // Receive all ARIDs at once
             println!("Thread 2: Waiting for ARIDs...");
-            while let Some(arid) = arid_rx.recv().await {
-                arid_count += 1;
-                println!("Thread 2: Received ARID {}", arid_count);
+            let arids = arid_rx.recv().await.expect("Failed to receive ARIDs");
+            println!("Thread 2: Received {} ARIDs", arids.len());
 
-                // Poll for the envelope with retries
-                println!("Thread 2: Polling for ARID {}...", arid_count);
-                let max_attempts = 60; // 30 seconds with 500ms polls
-                let mut attempt = 0;
+            // Create local set for spawn_local tasks
+            let local_set = tokio::task::LocalSet::new();
 
-                loop {
-                    attempt += 1;
-                    match store2.get(&arid).await {
-                        Ok(Some(envelope)) => {
-                            // Extract subject
-                            let subject = envelope
-                                .extract_subject::<String>()
-                                .unwrap_or_else(|_| "unknown".to_string());
+            // Spawn concurrent get tasks within the LocalSet
+            local_set.run_until(async {
+                let mut get_tasks = Vec::new();
+                for (i, arid) in arids.iter().enumerate() {
+                    let store_ref = Arc::clone(&store2);
+                    let arid_copy = *arid;
+                    let result_tx_clone = result_tx.clone();
 
-                            println!(
-                                "Thread 2: Got ARID {} on attempt {} - subject: '{}'",
-                                arid_count, attempt, subject
-                            );
+                    let task = tokio::task::spawn_local(async move {
+                        println!("Thread 2: Polling for ARID {}...", i + 1);
+                        let max_attempts = 60; // 30 seconds with 500ms polls
+                        let mut attempt = 0;
 
-                            received.push((arid, subject.clone()));
-                            result_tx.send((arid, subject)).await.unwrap();
-                            break;
-                        }
-                        Ok(None) => {
-                            if attempt >= max_attempts {
-                                eprintln!(
-                                    "Thread 2: Timeout waiting for ARID {} after {} attempts",
-                                    arid_count, attempt
-                                );
-                                return Err::<Vec<(ARID, String)>, anyhow::Error>(
-                                    anyhow::anyhow!("Timeout waiting for ARID {}", arid_count),
-                                );
+                        loop {
+                            attempt += 1;
+                            match store_ref.get(&arid_copy).await {
+                                Ok(Some(envelope)) => {
+                                    // Extract subject
+                                    let subject = envelope
+                                        .extract_subject::<String>()
+                                        .unwrap_or_else(|_| "unknown".to_string());
+
+                                    println!(
+                                        "Thread 2: Got ARID {} on attempt {} - subject: '{}'",
+                                        i + 1, attempt, subject
+                                    );
+
+                                    result_tx_clone.send((arid_copy, subject.clone())).await.unwrap();
+                                    return Ok((arid_copy, subject));
+                                }
+                                Ok(None) => {
+                                    if attempt >= max_attempts {
+                                        eprintln!(
+                                            "Thread 2: Timeout waiting for ARID {} after {} attempts",
+                                            i + 1, attempt
+                                        );
+                                        return Err(anyhow::anyhow!(
+                                            "Timeout waiting for ARID {}",
+                                            i + 1
+                                        ));
+                                    }
+                                    // Wait before retry
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                }
+                                Err(e) => {
+                                    eprintln!("Thread 2: Get {} failed - {}", i + 1, e);
+                                    return Err(anyhow::anyhow!("Get failed: {}", e));
+                                }
                             }
-                            // Wait before retry
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        }
+                    });
+                    get_tasks.push(task);
+                }
+
+                println!("Thread 2: Waiting for all {} gets to complete...", get_tasks.len());
+
+                // Wait for all gets to complete
+                let mut received = Vec::new();
+                for (i, task) in get_tasks.into_iter().enumerate() {
+                    match task.await.unwrap() {
+                        Ok(result) => {
+                            println!("Thread 2: Get {} completed", i + 1);
+                            received.push(result);
                         }
                         Err(e) => {
-                            eprintln!("Thread 2: Get failed - {}", e);
-                            return Err(anyhow::anyhow!("Get failed: {}", e));
+                            eprintln!("Thread 2: Task {} failed: {}", i + 1, e);
+                            return Err(e);
                         }
                     }
                 }
-            }
 
-            println!("Thread 2: Received all {} envelopes", received.len());
-            drop(result_tx); // Signal completion
-            Ok(received)
+                println!("Thread 2: Received all {} envelopes", received.len());
+                drop(result_tx); // Signal completion
+                Ok(received)
+            }).await
         })
     });
 
