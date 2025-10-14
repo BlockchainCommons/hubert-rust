@@ -1,11 +1,12 @@
-use anyhow::Result;
-use futures_util::TryStreamExt;
-use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
-use ipfs_api_prelude::request::KeyType;
 use std::{
     io::Cursor,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use anyhow::Result;
+use futures_util::TryStreamExt;
+use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
+use ipfs_api_prelude::request::KeyType;
 use tokio::time::{Duration, Instant, sleep};
 
 // This uses IPNS as the mutable name. It:
@@ -70,7 +71,8 @@ async fn ipns_mutable_roundtrip() -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let res = client
-            // name_resolve(name, recursive, nocache, dht_record_count, dht_timeout)
+            // name_resolve(name, recursive, nocache, dht_record_count,
+            // dht_timeout)
             // - name: Some(peer_id) to resolve /ipns/<peer_id>
             // - recursive=false: single-hop resolve
             // - nocache=false: allow local cache (fast on same node)

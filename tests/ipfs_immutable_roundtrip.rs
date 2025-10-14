@@ -1,8 +1,9 @@
+use std::io::Cursor;
+
 use anyhow::Result;
 use futures_util::TryStreamExt;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
-use std::io::Cursor;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Requires a local Kubo daemon (default RPC at 127.0.0.1:5001).
 /// Run with: cargo test -q -- --ignored --nocapture ipfs_immutable_roundtrip

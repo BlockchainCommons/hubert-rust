@@ -83,7 +83,8 @@ async fn immutable_put_then_get_testnet() -> Result<()> {
 }
 
 /// Mainnet variant: hits the real Mainline DHT. Requires outbound UDP.
-/// Run with: cargo test -q -- --ignored --nocapture immutable_put_then_get_mainnet
+/// Run with: cargo test -q -- --ignored --nocapture
+/// immutable_put_then_get_mainnet
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "hits the real Mainline DHT and needs UDP connectivity"]
 async fn immutable_put_then_get_mainnet() -> Result<()> {

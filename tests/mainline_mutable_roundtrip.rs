@@ -1,10 +1,11 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::Result;
 use mainline::{Dht, MutableItem, SigningKey, Testnet, async_dht::AsyncDht};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, Instant, sleep};
 
-/// Shared test logic: stores a BEP-44 mutable value with a selected key (+salt),
-/// then retrieves the most recent item from a separate agent.
+/// Shared test logic: stores a BEP-44 mutable value with a selected key
+/// (+salt), then retrieves the most recent item from a separate agent.
 async fn mutable_roundtrip_test(
     writer: AsyncDht,
     reader: AsyncDht,
@@ -117,7 +118,8 @@ async fn mutable_put_then_get_testnet() -> Result<()> {
 }
 
 /// Mainnet variant: hits the real Mainline DHT. Requires outbound UDP.
-/// Run with: cargo test -q -- --ignored --nocapture mutable_put_then_get_mainnet
+/// Run with: cargo test -q -- --ignored --nocapture
+/// mutable_put_then_get_mainnet
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "hits the real Mainline DHT and needs UDP connectivity"]
 async fn mutable_put_then_get_mainnet() -> Result<()> {

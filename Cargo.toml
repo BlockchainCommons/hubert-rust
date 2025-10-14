@@ -10,11 +10,16 @@ bc-components = "^0.25.0"
 bc-envelope = "^0.34.0"
 bc-xid = "^0.13.0"
 gstp = "^0.10.0"
+known-values = "^0.8.0"
 
 ipfs-api-backend-hyper = "0.6.0"
 ipfs-api-prelude = "0.6.0"
 mainline = "6"
 thiserror = "2"
+hex = "0.4"
+tokio = { version = "1", features = ["sync"] }
+futures-util = "0.3"
+async-trait = "0.1"
 
 [dev-dependencies]
 futures-util = "0.3"
