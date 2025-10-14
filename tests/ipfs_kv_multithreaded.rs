@@ -3,8 +3,21 @@ use std::{sync::Arc, thread};
 use anyhow::Result;
 use bc_components::ARID;
 use bc_envelope::Envelope;
+use futures_util::future;
 use hubert::{KvStore, ipfs::IpfsKv};
 use tokio::sync::mpsc;
+
+/// Helper to get current timestamp in ISO-8601 Zulu format
+fn timestamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Macro for timestamped logging
+macro_rules! log {
+    ($($arg:tt)*) => {
+        println!("[{}] {}", timestamp(), format!($($arg)*))
+    };
+}
 
 /// Test multi-threaded IPFS KV operations with concurrent tasks.
 ///
@@ -69,10 +82,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
             arid_tx.send(arids_clone.clone()).await.unwrap();
             drop(arid_tx);
 
-            println!(
-                "Thread 1: Sent all {} ARIDs to thread 2",
-                arids_clone.len()
-            );
+            log!("Thread 1: Sent all {} ARIDs to thread 2", arids_clone.len());
 
             // Create local set for spawn_local tasks
             let local_set = tokio::task::LocalSet::new();
@@ -89,7 +99,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                         let arid_copy = *arid;
 
                         let task = tokio::task::spawn_local(async move {
-                            println!(
+                            log!(
                                 "Thread 1: Putting ARID {} with subject '{}'",
                                 i + 1,
                                 subject
@@ -97,7 +107,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
 
                             match store_ref.put(&arid_copy, &envelope).await {
                                 Ok(receipt) => {
-                                    println!(
+                                    log!(
                                         "Thread 1: Put {} successful - {}",
                                         i + 1,
                                         receipt
@@ -105,7 +115,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                                     Ok::<(), anyhow::Error>(())
                                 }
                                 Err(e) => {
-                                    eprintln!(
+                                    log!(
                                         "Thread 1: Put {} failed - {}",
                                         i + 1,
                                         e
@@ -117,18 +127,20 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                         put_tasks.push(task);
                     }
 
-                    println!(
+                    log!(
                         "Thread 1: Waiting for all {} puts to complete...",
                         put_tasks.len()
                     );
 
-                    // Wait for all puts to complete
-                    for (i, task) in put_tasks.into_iter().enumerate() {
-                        task.await.unwrap()?;
-                        println!("Thread 1: Put {} completed", i + 1);
+                    // Wait for all puts to complete concurrently
+                    let results = future::join_all(put_tasks).await;
+
+                    for (i, result) in results.into_iter().enumerate() {
+                        result.unwrap()?;
+                        log!("Thread 1: Put {} completed", i + 1);
                     }
 
-                    println!("Thread 1: All puts completed successfully");
+                    log!("Thread 1: All puts completed successfully");
                     Ok::<(), anyhow::Error>(())
                 })
                 .await
@@ -142,9 +154,9 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             // Receive all ARIDs at once
-            println!("Thread 2: Waiting for ARIDs...");
+            log!("Thread 2: Waiting for ARIDs...");
             let arids = arid_rx.recv().await.expect("Failed to receive ARIDs");
-            println!("Thread 2: Received {} ARIDs", arids.len());
+            log!("Thread 2: Received {} ARIDs", arids.len());
 
             // Create local set for spawn_local tasks
             let local_set = tokio::task::LocalSet::new();
@@ -158,7 +170,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                     let result_tx_clone = result_tx.clone();
 
                     let task = tokio::task::spawn_local(async move {
-                        println!("Thread 2: Polling for ARID {}...", i + 1);
+                        log!("Thread 2: Polling for ARID {}...", i + 1);
                         let max_attempts = 60; // 30 seconds with 500ms polls
                         let mut attempt = 0;
 
@@ -171,7 +183,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                                         .extract_subject::<String>()
                                         .unwrap_or_else(|_| "unknown".to_string());
 
-                                    println!(
+                                    log!(
                                         "Thread 2: Got ARID {} on attempt {} - subject: '{}'",
                                         i + 1, attempt, subject
                                     );
@@ -181,7 +193,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                                 }
                                 Ok(None) => {
                                     if attempt >= max_attempts {
-                                        eprintln!(
+                                        log!(
                                             "Thread 2: Timeout waiting for ARID {} after {} attempts",
                                             i + 1, attempt
                                         );
@@ -194,7 +206,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                                 }
                                 Err(e) => {
-                                    eprintln!("Thread 2: Get {} failed - {}", i + 1, e);
+                                    log!("Thread 2: Get {} failed - {}", i + 1, e);
                                     return Err(anyhow::anyhow!("Get failed: {}", e));
                                 }
                             }
@@ -203,24 +215,26 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
                     get_tasks.push(task);
                 }
 
-                println!("Thread 2: Waiting for all {} gets to complete...", get_tasks.len());
+                log!("Thread 2: Waiting for all {} gets to complete...", get_tasks.len());
 
-                // Wait for all gets to complete
+                // Wait for all gets to complete concurrently
+                let results = future::join_all(get_tasks).await;
+
                 let mut received = Vec::new();
-                for (i, task) in get_tasks.into_iter().enumerate() {
-                    match task.await.unwrap() {
+                for (i, result) in results.into_iter().enumerate() {
+                    match result.unwrap() {
                         Ok(result) => {
-                            println!("Thread 2: Get {} completed", i + 1);
+                            log!("Thread 2: Get {} completed", i + 1);
                             received.push(result);
                         }
                         Err(e) => {
-                            eprintln!("Thread 2: Task {} failed: {}", i + 1, e);
+                            log!("Thread 2: Task {} failed: {}", i + 1, e);
                             return Err(e);
                         }
                     }
                 }
 
-                println!("Thread 2: Received all {} envelopes", received.len());
+                log!("Thread 2: Received all {} envelopes", received.len());
                 drop(result_tx); // Signal completion
                 Ok(received)
             }).await
@@ -240,7 +254,7 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
         .expect("Thread 2 returned error");
 
     // Verify results on main thread
-    println!("\nMain thread: Verifying results...");
+    log!("\nMain thread: Verifying results...");
     assert_eq!(received.len(), 3, "Should have received all 3 envelopes");
 
     // Collect results from channel
@@ -263,13 +277,13 @@ async fn ipfs_kv_multithreaded() -> Result<()> {
             "Subject mismatch for ARID: expected '{}', got '{}'",
             expected_subject, found.1
         );
-        println!("✓ ARID verified: {} -> '{}'", arid, found.1);
+        log!("✓ ARID verified: {} -> '{}'", arid, found.1);
     }
 
-    println!("\n✓ All data verified successfully!");
-    println!("✓ Thread 1 put {} envelopes", arids.len());
-    println!("✓ Thread 2 retrieved {} envelopes", received.len());
-    println!("✓ Main thread verified all data matches");
+    log!("\n✓ All data verified successfully!");
+    log!("✓ Thread 1 put {} envelopes", arids.len());
+    log!("✓ Thread 2 retrieved {} envelopes", received.len());
+    log!("✓ Main thread verified all data matches");
 
     Ok(())
 }
