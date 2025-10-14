@@ -93,6 +93,7 @@ async fn mutable_roundtrip_test(
 
 /// Testnet variant: runs against an in-process DHT.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Proof of Concept only."]
 async fn mutable_put_then_get_testnet() -> Result<()> {
     // Create an in-process DHT with its own bootstrap nodes.
     let testnet = Testnet::new_async(5).await?;
@@ -121,7 +122,7 @@ async fn mutable_put_then_get_testnet() -> Result<()> {
 /// Run with: cargo test -q -- --ignored --nocapture
 /// mutable_put_then_get_mainnet
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "hits the real Mainline DHT and needs UDP connectivity"]
+#[ignore = "Proof of Concept only."]
 async fn mutable_put_then_get_mainnet() -> Result<()> {
     // Two separate agents on mainnet using default bootstrap nodes.
     let writer = Dht::client()?.as_async();

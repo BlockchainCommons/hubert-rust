@@ -27,7 +27,7 @@ async fn cat_all(client: &IpfsClient, cid: &str) -> Result<Vec<u8>> {
 /// Requires a local Kubo daemon (default RPC at 127.0.0.1:5001).
 /// Run with: cargo test -q -- --ignored --nocapture ipns_mutable_roundtrip
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs a running IPFS daemon (kubo) on 127.0.0.1:5001"]
+#[ignore = "Proof of Concept only. Meeds a running IPFS daemon (kubo) on 127.0.0.1:5001"]
 async fn ipns_mutable_roundtrip() -> Result<()> {
     let client = IpfsClient::default();
 

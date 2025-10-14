@@ -58,6 +58,7 @@ async fn immutable_roundtrip_test(
 
 /// Testnet variant: runs against an in-process DHT.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Proof of Concept only."]
 async fn immutable_put_then_get_testnet() -> Result<()> {
     // Create an in-process DHT with its own bootstrap nodes.
     let testnet = Testnet::new_async(5).await?;

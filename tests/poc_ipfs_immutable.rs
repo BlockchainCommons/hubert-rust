@@ -8,7 +8,7 @@ use tokio::time::{Duration, sleep};
 /// Requires a local Kubo daemon (default RPC at 127.0.0.1:5001).
 /// Run with: cargo test -q -- --ignored --nocapture ipfs_immutable_roundtrip
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs a running IPFS daemon (kubo) on 127.0.0.1:5001"]
+#[ignore = "Proof of Concept only. Needs a running IPFS daemon (kubo) on 127.0.0.1:5001"]
 async fn ipfs_immutable_roundtrip() -> Result<()> {
     let client = IpfsClient::default();
 
