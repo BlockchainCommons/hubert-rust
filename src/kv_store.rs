@@ -38,7 +38,7 @@ use bc_envelope::Envelope;
 ///
 /// **Working pattern:**
 /// ```no_run
-/// # use hubert::ipfs::IpfsKv;
+/// # use hubert::{ipfs::IpfsKv, KvStore};
 /// # use bc_components::ARID;
 /// # use bc_envelope::Envelope;
 /// use std::sync::Arc;
@@ -60,7 +60,7 @@ use bc_envelope::Envelope;
 ///
 /// **Non-working pattern:**
 /// ```compile_fail
-/// # use hubert::ipfs::IpfsKv;
+/// # use hubert::{ipfs::IpfsKv, KvStore};
 /// # use bc_components::ARID;
 /// # use bc_envelope::Envelope;
 /// # async fn example() {
@@ -104,15 +104,15 @@ pub trait KvStore: Send + Sync {
     /// # Example
     ///
     /// ```no_run
+    /// # use hubert::KvStore;
     /// # use bc_components::ARID;
     /// # use bc_envelope::Envelope;
-    /// # async fn example(store: &impl hubert::KvStore) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(store: &impl hubert::KvStore) {
     /// let arid = ARID::new();
     /// let envelope = Envelope::new("Hello, Hubert!");
     ///
-    /// let receipt = store.put(&arid, &envelope).await?;
+    /// let receipt = store.put(&arid, &envelope).await.unwrap();
     /// println!("Stored at: {}", receipt);
-    /// # Ok(())
     /// # }
     /// ```
     async fn put(
@@ -136,13 +136,13 @@ pub trait KvStore: Send + Sync {
     /// # Example
     ///
     /// ```no_run
+    /// # use hubert::KvStore;
     /// # use bc_components::ARID;
-    /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) -> Result<(), Box<dyn std::error::Error>> {
-    /// match store.get(arid).await? {
+    /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) {
+    /// match store.get(arid).await.unwrap() {
     ///     Some(envelope) => println!("Found: {}", envelope),
     ///     None => println!("Not found"),
     /// }
-    /// # Ok(())
     /// # }
     /// ```
     async fn get(
@@ -170,14 +170,14 @@ pub trait KvStore: Send + Sync {
     /// # Example
     ///
     /// ```no_run
+    /// # use hubert::KvStore;
     /// # use bc_components::ARID;
-    /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) -> Result<(), Box<dyn std::error::Error>> {
-    /// if store.exists(arid).await? {
+    /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) {
+    /// if store.exists(arid).await.unwrap() {
     ///     println!("ARID already used");
     /// } else {
     ///     println!("ARID available");
     /// }
-    /// # Ok(())
     /// # }
     /// ```
     async fn exists(

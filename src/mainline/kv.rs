@@ -4,7 +4,7 @@ use dcbor::CBOREncodable;
 use mainline::{Dht, MutableItem, SigningKey};
 
 use super::error::{GetError, PutError};
-use crate::{arid_derivation::derive_mainline_key, KvStore};
+use crate::{KvStore, arid_derivation::derive_mainline_key};
 
 /// Mainline DHT-backed key-value store using ARID-based addressing.
 ///
@@ -37,21 +37,20 @@ use crate::{arid_derivation::derive_mainline_key, KvStore};
 /// ```no_run
 /// use bc_components::ARID;
 /// use bc_envelope::Envelope;
-/// use hubert::mainline::MainlineDhtKv;
+/// use hubert::{mainline::MainlineDhtKv, KvStore};
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let store = MainlineDhtKv::new().await?;
+/// # async fn example() {
+/// let store = MainlineDhtKv::new().await.unwrap();
 /// let arid = ARID::new();
 /// let envelope = Envelope::new("Small message");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope).await?;
+/// store.put(&arid, &envelope).await.unwrap();
 ///
 /// // Get envelope
-/// if let Some(retrieved) = store.get(&arid).await? {
+/// if let Some(retrieved) = store.get(&arid).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
-/// # Ok(())
 /// # }
 /// ```
 pub struct MainlineDhtKv {
@@ -117,9 +116,9 @@ impl KvStore for MainlineDhtKv {
         arid: &ARID,
         envelope: &Envelope,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        self.put_impl(arid, envelope).await.map_err(|e| {
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn get(
@@ -127,18 +126,18 @@ impl KvStore for MainlineDhtKv {
         arid: &ARID,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
-        self.get_impl(arid)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        self.get_impl(arid).await.map_err(|e| {
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn exists(
         &self,
         arid: &ARID,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        self.exists_impl(arid)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        self.exists_impl(arid).await.map_err(|e| {
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 }
 
@@ -169,9 +168,7 @@ impl MainlineDhtKv {
             .await
             .is_some()
         {
-            return Err(PutError::AlreadyExists {
-                key: hex::encode(pubkey),
-            });
+            return Err(PutError::AlreadyExists { key: hex::encode(pubkey) });
         }
 
         // Create mutable item with seq=1 (first write)

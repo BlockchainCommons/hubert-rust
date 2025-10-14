@@ -31,21 +31,20 @@ use crate::{KvStore, arid_derivation::derive_ipfs_key_name};
 /// ```no_run
 /// use bc_components::ARID;
 /// use bc_envelope::Envelope;
-/// use hubert::ipfs::IpfsKv;
+/// use hubert::{ipfs::IpfsKv, KvStore};
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn example() {
 /// let store = IpfsKv::new("http://127.0.0.1:5001");
 /// let arid = ARID::new();
 /// let envelope = Envelope::new("Hello, IPFS!");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope).await?;
+/// store.put(&arid, &envelope).await.unwrap();
 ///
 /// // Get envelope
-/// if let Some(retrieved) = store.get(&arid).await? {
+/// if let Some(retrieved) = store.get(&arid).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
-/// # Ok(())
 /// # }
 /// ```
 pub struct IpfsKv {
