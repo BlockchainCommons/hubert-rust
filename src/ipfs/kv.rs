@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use bc_components::ARID;
 use bc_envelope::Envelope;
+use dcbor::CBOREncodable;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
 use ipfs_api_prelude::request::KeyType;
 use tokio::time::{Duration, Instant, sleep};
@@ -9,9 +10,7 @@ use tokio::time::{Duration, Instant, sleep};
 use super::{
     arid_derivation::derive_key_name,
     error::{GetError, PutError},
-    value::{
-        add_bytes, cat_bytes, deserialize_envelope, pin_cid, serialize_envelope,
-    },
+    value::{add_bytes, cat_bytes, pin_cid},
 };
 use crate::KvStore;
 
@@ -115,11 +114,7 @@ impl IpfsKv {
         }
 
         // List existing keys to see if it already exists
-        let keys = self
-            .client
-            .key_list()
-            .await
-            .map_err(|e| PutError::DaemonError(e.to_string()))?;
+        let keys = self.client.key_list().await?;
 
         if let Some(key) = keys.keys.iter().find(|k| k.name == key_name) {
             let info = KeyInfo { peer_id: key.id.clone() };
@@ -132,11 +127,8 @@ impl IpfsKv {
         }
 
         // Generate new key
-        let key_info = self
-            .client
-            .key_gen(&key_name, KeyType::Ed25519, 0)
-            .await
-            .map_err(|e| PutError::DaemonError(e.to_string()))?;
+        let key_info =
+            self.client.key_gen(&key_name, KeyType::Ed25519, 0).await?;
 
         let info = KeyInfo { peer_id: key_info.id };
 
@@ -191,8 +183,7 @@ impl IpfsKv {
                 None,
                 Some(key_name),
             )
-            .await
-            .map_err(|e| PutError::DaemonError(e.to_string()))?;
+            .await?;
 
         Ok(())
     }
@@ -248,46 +239,9 @@ impl KvStore for IpfsKv {
         arid: &ARID,
         envelope: &Envelope,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Serialize envelope
-        let bytes = serialize_envelope(envelope).map_err(|e| {
+        self.put_impl(arid, envelope).await.map_err(|e| {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        // Check size
-        if bytes.len() > self.max_envelope_size {
-            return Err(Box::new(PutError::EnvelopeTooLarge {
-                size: bytes.len(),
-            })
-                as Box<dyn std::error::Error + Send + Sync>);
-        }
-
-        // Get or create IPNS key
-        let key_info = self.get_or_create_key(arid).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        let key_name = derive_key_name(arid);
-
-        // Add to IPFS
-        let cid = add_bytes(&self.client, bytes).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        // Pin if requested
-        if self.pin_content {
-            pin_cid(&self.client, &cid, true).await.map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-        }
-
-        // Publish to IPNS (write-once)
-        self.publish_once(&key_name, &key_info.peer_id, &cid)
-            .await
-            .map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-
-        Ok(format!("ipns://{} -> ipfs://{}", key_info.peer_id, cid))
+        })
     }
 
     async fn get(
@@ -295,13 +249,65 @@ impl KvStore for IpfsKv {
         arid: &ARID,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
+        self.get_impl(arid).await.map_err(|e| {
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })
+    }
+
+    async fn exists(
+        &self,
+        arid: &ARID,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        self.exists_impl(arid).await.map_err(|e| {
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })
+    }
+}
+
+impl IpfsKv {
+    /// Internal put implementation with typed errors.
+    async fn put_impl(
+        &self,
+        arid: &ARID,
+        envelope: &Envelope,
+    ) -> Result<String, PutError> {
+        // Serialize envelope
+        let bytes = envelope.to_cbor_data();
+
+        // Check size
+        if bytes.len() > self.max_envelope_size {
+            return Err(PutError::EnvelopeTooLarge { size: bytes.len() });
+        }
+
+        // Get or create IPNS key
+        let key_info = self.get_or_create_key(arid).await?;
+
+        let key_name = derive_key_name(arid);
+
+        // Add to IPFS
+        let cid = add_bytes(&self.client, bytes).await?;
+
+        // Pin if requested
+        if self.pin_content {
+            pin_cid(&self.client, &cid, true).await?;
+        }
+
+        // Publish to IPNS (write-once)
+        self.publish_once(&key_name, &key_info.peer_id, &cid)
+            .await?;
+
+        Ok(format!("ipns://{} -> ipfs://{}", key_info.peer_id, cid))
+    }
+
+    /// Internal get implementation with typed errors.
+    async fn get_impl(
+        &self,
+        arid: &ARID,
+    ) -> Result<Option<Envelope>, GetError> {
         let key_name = derive_key_name(arid);
 
         // Get key info from cache or daemon
-        let keys = self.client.key_list().await.map_err(|e| {
-            Box::new(GetError::DaemonError(e.to_string()))
-                as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let keys = self.client.key_list().await?;
 
         let key = keys.keys.iter().find(|k| k.name == key_name);
         if key.is_none() {
@@ -312,9 +318,7 @@ impl KvStore for IpfsKv {
         let peer_id = &key.unwrap().id;
 
         // Resolve IPNS to CID
-        let cid = self.resolve_with_retry(peer_id).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let cid = self.resolve_with_retry(peer_id).await?;
 
         if cid.is_none() {
             return Ok(None);
@@ -323,29 +327,20 @@ impl KvStore for IpfsKv {
         let cid = cid.unwrap();
 
         // Cat CID
-        let bytes = cat_bytes(&self.client, &cid).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let bytes = cat_bytes(&self.client, &cid).await?;
 
         // Deserialize envelope
-        let envelope = deserialize_envelope(&bytes).map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let envelope = Envelope::try_from_cbor_data(bytes)?;
 
         Ok(Some(envelope))
     }
 
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    /// Internal exists implementation with typed errors.
+    async fn exists_impl(&self, arid: &ARID) -> Result<bool, GetError> {
         let key_name = derive_key_name(arid);
 
         // List keys to check if key exists
-        let keys = self.client.key_list().await.map_err(|e| {
-            Box::new(GetError::DaemonError(e.to_string()))
-                as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let keys = self.client.key_list().await?;
 
         let key = keys.keys.iter().find(|k| k.name == key_name);
         if key.is_none() {
@@ -365,8 +360,7 @@ impl KvStore for IpfsKv {
                 {
                     Ok(false)
                 } else {
-                    Err(Box::new(GetError::DaemonError(err_str))
-                        as Box<dyn std::error::Error + Send + Sync>)
+                    Err(GetError::DaemonError(err_str))
                 }
             }
         }

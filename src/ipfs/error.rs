@@ -27,7 +27,15 @@ impl From<bc_envelope::Error> for PutError {
 }
 
 impl From<dcbor::Error> for PutError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
+}
+
+impl From<ipfs_api_backend_hyper::Error> for PutError {
+    fn from(e: ipfs_api_backend_hyper::Error) -> Self {
+        Self::DaemonError(e.to_string())
+    }
 }
 
 /// Errors that can occur during IPFS get operations.
@@ -56,5 +64,13 @@ impl From<bc_envelope::Error> for GetError {
 }
 
 impl From<dcbor::Error> for GetError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
+}
+
+impl From<ipfs_api_backend_hyper::Error> for GetError {
+    fn from(e: ipfs_api_backend_hyper::Error) -> Self {
+        Self::DaemonError(e.to_string())
+    }
 }
