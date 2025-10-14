@@ -8,11 +8,10 @@ use ipfs_api_prelude::request::KeyType;
 use tokio::time::{Duration, Instant, sleep};
 
 use super::{
-    arid_derivation::derive_key_name,
     error::{GetError, PutError},
     value::{add_bytes, cat_bytes, pin_cid},
 };
-use crate::KvStore;
+use crate::{KvStore, arid_derivation::derive_ipfs_key_name};
 
 /// IPFS-backed key-value store using IPNS for ARID-based addressing.
 ///
@@ -103,7 +102,7 @@ impl IpfsKv {
         &self,
         arid: &ARID,
     ) -> Result<KeyInfo, PutError> {
-        let key_name = derive_key_name(arid);
+        let key_name = derive_ipfs_key_name(arid);
 
         // Check cache first
         {
@@ -282,7 +281,7 @@ impl IpfsKv {
         // Get or create IPNS key
         let key_info = self.get_or_create_key(arid).await?;
 
-        let key_name = derive_key_name(arid);
+        let key_name = derive_ipfs_key_name(arid);
 
         // Add to IPFS
         let cid = add_bytes(&self.client, bytes).await?;
@@ -304,7 +303,7 @@ impl IpfsKv {
         &self,
         arid: &ARID,
     ) -> Result<Option<Envelope>, GetError> {
-        let key_name = derive_key_name(arid);
+        let key_name = derive_ipfs_key_name(arid);
 
         // Get key info from cache or daemon
         let keys = self.client.key_list().await?;
@@ -337,7 +336,7 @@ impl IpfsKv {
 
     /// Internal exists implementation with typed errors.
     async fn exists_impl(&self, arid: &ARID) -> Result<bool, GetError> {
-        let key_name = derive_key_name(arid);
+        let key_name = derive_ipfs_key_name(arid);
 
         // List keys to check if key exists
         let keys = self.client.key_list().await?;
