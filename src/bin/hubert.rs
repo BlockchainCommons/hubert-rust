@@ -54,10 +54,21 @@ enum Commands {
         /// ARID key (ur:arid format)
         #[arg(value_name = "ARID")]
         arid: String,
+
+        /// Maximum time to wait in seconds (default: 30)
+        #[arg(long, short, default_value = "30")]
+        timeout: u64,
     },
 
     /// Check if storage backend is available
     Check,
+
+    /// Start the Hubert HTTP server
+    Server {
+        /// Port to listen on
+        #[arg(long, short, default_value = "45678")]
+        port: u16,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -119,7 +130,7 @@ async fn check_ipfs() -> Result<()> {
 async fn put_mainline(arid: &ARID, envelope: &Envelope) -> Result<()> {
     let store = MainlineDhtKv::new().await.map_err(|e| anyhow!("{}", e))?;
     store
-        .put(arid, envelope)
+        .put(arid, envelope, None) // No TTL for mainline (not supported)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
@@ -129,21 +140,27 @@ async fn put_mainline(arid: &ARID, envelope: &Envelope) -> Result<()> {
 async fn put_ipfs(arid: &ARID, envelope: &Envelope) -> Result<()> {
     let store = IpfsKv::new("http://127.0.0.1:5001");
     store
-        .put(arid, envelope)
+        .put(arid, envelope, None) // No TTL (use IPFS default of 24h)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
     Ok(())
 }
 
-async fn get_mainline(arid: &ARID) -> Result<Option<Envelope>> {
+async fn get_mainline(arid: &ARID, timeout: u64) -> Result<Option<Envelope>> {
     let store = MainlineDhtKv::new().await.map_err(|e| anyhow!("{}", e))?;
-    store.get(arid).await.map_err(|e| anyhow!("{}", e))
+    store
+        .get(arid, Some(timeout))
+        .await
+        .map_err(|e| anyhow!("{}", e))
 }
 
-async fn get_ipfs(arid: &ARID) -> Result<Option<Envelope>> {
+async fn get_ipfs(arid: &ARID, timeout: u64) -> Result<Option<Envelope>> {
     let store = IpfsKv::new("http://127.0.0.1:5001");
-    store.get(arid).await.map_err(|e| anyhow!("{}", e))
+    store
+        .get(arid, Some(timeout))
+        .await
+        .map_err(|e| anyhow!("{}", e))
 }
 
 #[tokio::main]
@@ -173,12 +190,14 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Get { arid } => {
+        Commands::Get { arid, timeout } => {
             let arid = parse_arid(&arid)?;
 
             let envelope = match cli.storage {
-                StorageBackend::Mainline => get_mainline(&arid).await?,
-                StorageBackend::Ipfs => get_ipfs(&arid).await?,
+                StorageBackend::Mainline => {
+                    get_mainline(&arid, timeout).await?
+                }
+                StorageBackend::Ipfs => get_ipfs(&arid, timeout).await?,
             };
 
             match envelope {
@@ -186,7 +205,7 @@ async fn main() -> Result<()> {
                     println!("{}", env.ur_string());
                 }
                 None => {
-                    bail!("Envelope not found at ARID");
+                    bail!("Envelope not found within {} seconds", timeout);
                 }
             }
         }
@@ -195,6 +214,17 @@ async fn main() -> Result<()> {
             StorageBackend::Mainline => check_mainline().await?,
             StorageBackend::Ipfs => check_ipfs().await?,
         },
+
+        Commands::Server { port } => {
+            use hubert::server::{Server, ServerConfig};
+
+            let config = ServerConfig {
+                port,
+                ..Default::default() // Use default TTL settings
+            };
+            let server = Server::new(config);
+            server.run().await.map_err(|e| anyhow!("{}", e))?;
+        }
     }
 
     Ok(())

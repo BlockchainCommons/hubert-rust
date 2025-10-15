@@ -164,6 +164,7 @@ impl IpfsKv {
         key_name: &str,
         peer_id: &str,
         cid: &str,
+        ttl_seconds: Option<u64>,
     ) -> Result<(), PutError> {
         // Check if already published
         if self.is_published(peer_id).await? {
@@ -172,13 +173,28 @@ impl IpfsKv {
             });
         }
 
+        // Convert TTL seconds to lifetime string for IPNS
+        // Format: "Ns" for seconds, "Nm" for minutes, "Nh" for hours, "Nd" for
+        // days
+        let lifetime = ttl_seconds.map(|secs| {
+            if secs < 60 {
+                format!("{}s", secs)
+            } else if secs < 3600 {
+                format!("{}m", secs / 60)
+            } else if secs < 86400 {
+                format!("{}h", secs / 3600)
+            } else {
+                format!("{}d", secs / 86400)
+            }
+        });
+
         // Publish to IPNS
         self.client
             .name_publish(
                 &format!("/ipfs/{}", cid),
                 false,
-                None,
-                None,
+                lifetime.as_deref(), // IPNS record lifetime (TTL)
+                None,                // Cache TTL hint
                 Some(key_name),
             )
             .await?;
@@ -186,12 +202,13 @@ impl IpfsKv {
         Ok(())
     }
 
-    /// Resolve an IPNS name to a CID with polling.
-    async fn resolve_with_retry(
+    /// Resolve an IPNS name to a CID with polling and custom timeout.
+    async fn resolve_with_retry_timeout(
         &self,
         peer_id: &str,
+        timeout: Duration,
     ) -> Result<Option<String>, GetError> {
-        let deadline = Instant::now() + self.resolve_timeout;
+        let deadline = Instant::now() + timeout;
 
         loop {
             match self.client.name_resolve(Some(peer_id), false, false).await {
@@ -236,18 +253,22 @@ impl KvStore for IpfsKv {
         &self,
         arid: &ARID,
         envelope: &Envelope,
+        ttl_seconds: Option<u64>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+        self.put_impl(arid, envelope, ttl_seconds)
+            .await
+            .map_err(|e| {
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn get(
         &self,
         arid: &ARID,
+        timeout_seconds: Option<u64>,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
-        self.get_impl(arid).await.map_err(|e| {
+        self.get_impl(arid, timeout_seconds).await.map_err(|e| {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })
     }
@@ -268,6 +289,7 @@ impl IpfsKv {
         &self,
         arid: &ARID,
         envelope: &Envelope,
+        ttl_seconds: Option<u64>,
     ) -> Result<String, PutError> {
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
@@ -291,7 +313,7 @@ impl IpfsKv {
         }
 
         // Publish to IPNS (write-once)
-        self.publish_once(&key_name, &key_info.peer_id, &cid)
+        self.publish_once(&key_name, &key_info.peer_id, &cid, ttl_seconds)
             .await?;
 
         Ok(format!("ipns://{} -> ipfs://{}", key_info.peer_id, cid))
@@ -301,6 +323,7 @@ impl IpfsKv {
     async fn get_impl(
         &self,
         arid: &ARID,
+        timeout_seconds: Option<u64>,
     ) -> Result<Option<Envelope>, GetError> {
         let key_name = derive_ipfs_key_name(arid);
 
@@ -315,8 +338,11 @@ impl IpfsKv {
 
         let peer_id = &key.unwrap().id;
 
-        // Resolve IPNS to CID
-        let cid = self.resolve_with_retry(peer_id).await?;
+        // Resolve IPNS to CID with specified timeout
+        let timeout = timeout_seconds
+            .map(Duration::from_secs)
+            .unwrap_or(self.resolve_timeout);
+        let cid = self.resolve_with_retry_timeout(peer_id, timeout).await?;
 
         if cid.is_none() {
             return Ok(None);

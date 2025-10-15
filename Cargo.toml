@@ -11,7 +11,7 @@ path = "src/bin/hubert.rs"
 bc-crypto = "^0.10.0"
 dcbor = { version = "^0.23.0", features = ["multithreaded"] }
 bc-components = "^0.25.0"
-bc-envelope = "^0.34.0"
+bc-envelope = { version = "^0.34.0", features = ["multithreaded"] }
 bc-ur = "^0.13.0"
 bc-xid = "^0.13.0"
 gstp = "^0.10.0"
@@ -28,6 +28,11 @@ async-trait = "0.1"
 clap = { version = "^4.4.3", features = ["derive", "unstable-styles"] }
 anyhow = "^1.0.0"
 reqwest = "0.12"
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 futures-util = "0.3"
@@ -37,5 +42,5 @@ chrono = "0.4"
 reqwest = "0.12"
 assert_cmd = "2"
 bc-components = "^0.25.0"
-bc-envelope = "^0.34.0"
+bc-envelope = { version = "^0.34.0", features = ["multithreaded"] }
 hex = "0.4"

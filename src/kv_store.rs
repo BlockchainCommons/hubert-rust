@@ -92,6 +92,13 @@ pub trait KvStore: Send + Sync {
     ///
     /// - `arid`: Cryptographic identifier for this storage location
     /// - `envelope`: The envelope to store
+    /// - `ttl_seconds`: Optional time-to-live in seconds. After this time, the
+    ///   envelope may be removed from storage.
+    ///   - **Mainline DHT**: Ignored (no TTL support)
+    ///   - **IPFS**: Used as IPNS record lifetime (default: 24h if None)
+    ///   - **Server**: Clamped to max_ttl if exceeded; uses max_ttl if None.
+    ///     All entries expire (hubert is for coordination, not long-term
+    ///     storage).
     ///
     /// # Returns
     ///
@@ -111,26 +118,39 @@ pub trait KvStore: Send + Sync {
     /// let arid = ARID::new();
     /// let envelope = Envelope::new("Hello, Hubert!");
     ///
-    /// let receipt = store.put(&arid, &envelope).await.unwrap();
-    /// println!("Stored at: {}", receipt);
+    /// // Store without TTL
+    /// let receipt = store.put(&arid, &envelope, None).await.unwrap();
+    ///
+    /// // Store with 1 hour TTL
+    /// let arid2 = ARID::new();
+    /// let receipt2 = store.put(&arid2, &envelope, Some(3600)).await.unwrap();
+    /// println!("Stored at: {}", receipt2);
     /// # }
     /// ```
     async fn put(
         &self,
         arid: &ARID,
         envelope: &Envelope,
+        ttl_seconds: Option<u64>,
     ) -> Result<String, Box<dyn Error + Send + Sync>>;
 
     /// Retrieve an envelope for the given ARID.
     ///
+    /// Polls the storage backend until the envelope becomes available or the
+    /// timeout is reached. This is useful for coordinating between parties
+    /// where one party puts data and another polls for it.
+    ///
     /// # Parameters
     ///
     /// - `arid`: The ARID to look up
+    /// - `timeout_seconds`: Maximum time to wait for the envelope to appear. If
+    ///   `None`, uses a backend-specific default (typically 30 seconds). After
+    ///   timeout, returns `Ok(None)` rather than continuing to poll.
     ///
     /// # Returns
     ///
-    /// - `Ok(Some(envelope))` if found
-    /// - `Ok(None)` if not found
+    /// - `Ok(Some(envelope))` if found within the timeout
+    /// - `Ok(None)` if not found after timeout expires
     /// - `Err(_)` on network or deserialization errors
     ///
     /// # Example
@@ -139,15 +159,17 @@ pub trait KvStore: Send + Sync {
     /// # use hubert::KvStore;
     /// # use bc_components::ARID;
     /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) {
-    /// match store.get(arid).await.unwrap() {
+    /// // Wait up to 10 seconds for envelope to appear
+    /// match store.get(arid, Some(10)).await.unwrap() {
     ///     Some(envelope) => println!("Found: {}", envelope),
-    ///     None => println!("Not found"),
+    ///     None => println!("Not found within timeout"),
     /// }
     /// # }
     /// ```
     async fn get(
         &self,
         arid: &ARID,
+        timeout_seconds: Option<u64>,
     ) -> Result<Option<Envelope>, Box<dyn Error + Send + Sync>>;
 
     /// Check if an envelope exists at the given ARID.

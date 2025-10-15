@@ -12,25 +12,33 @@ pub async fn test_basic_roundtrip(store: &impl KvStore) {
     let envelope = Envelope::new("Test").add_assertion("key", "value");
 
     assert!(!store.exists(&arid).await.unwrap());
-    store.put(&arid, &envelope).await.unwrap();
+    store.put(&arid, &envelope, None).await.unwrap();
     assert!(store.exists(&arid).await.unwrap());
 
-    let retrieved = store.get(&arid).await.unwrap().unwrap();
+    let retrieved = store.get(&arid, Some(30)).await.unwrap().unwrap();
     assert_eq!(retrieved, envelope);
     println!("✓ Basic roundtrip test passed");
 }
 
 pub async fn test_write_once(store: &impl KvStore) {
     let arid = ARID::new();
-    store.put(&arid, &Envelope::new("First")).await.unwrap();
-    assert!(store.put(&arid, &Envelope::new("Second")).await.is_err());
+    store
+        .put(&arid, &Envelope::new("First"), None)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .put(&arid, &Envelope::new("Second"), None)
+            .await
+            .is_err()
+    );
     println!("✓ Write-once test passed");
 }
 
 pub async fn test_nonexistent_arid(store: &impl KvStore) {
     let arid = ARID::new();
     assert!(!store.exists(&arid).await.unwrap());
-    assert!(store.get(&arid).await.unwrap().is_none());
+    assert!(store.get(&arid, Some(30)).await.unwrap().is_none());
     println!("✓ Non-existent ARID test passed");
 }
 
@@ -38,7 +46,7 @@ pub async fn test_multiple_arids(store: &impl KvStore) {
     let arids: Vec<_> = (0..5).map(|_| ARID::new()).collect();
     for (i, arid) in arids.iter().enumerate() {
         store
-            .put(arid, &Envelope::new(format!("Msg {}", i).as_str()))
+            .put(arid, &Envelope::new(format!("Msg {}", i).as_str()), None)
             .await
             .unwrap();
     }
@@ -48,7 +56,7 @@ pub async fn test_multiple_arids(store: &impl KvStore) {
 pub async fn test_size_limit(store: &impl KvStore, max_size: usize) {
     let arid = ARID::new();
     let large = Envelope::new("x".repeat(max_size + 1000).as_str());
-    assert!(store.put(&arid, &large).await.is_err());
+    assert!(store.put(&arid, &large, None).await.is_err());
     println!("✓ Size limit test passed");
 }
 
@@ -101,7 +109,10 @@ where
                         let arid_copy = *arid;
 
                         let task = tokio::task::spawn_local(async move {
-                            store_ref.put(&arid_copy, &envelope).await.unwrap();
+                            store_ref
+                                .put(&arid_copy, &envelope, None)
+                                .await
+                                .unwrap();
                         });
                         tasks.push(task);
                     }
@@ -135,7 +146,8 @@ where
 
                             loop {
                                 attempt += 1;
-                                match store_ref.get(&arid_copy).await {
+                                match store_ref.get(&arid_copy, Some(30)).await
+                                {
                                     Ok(Some(envelope)) => {
                                         let subject: String =
                                             envelope.extract_subject().unwrap();

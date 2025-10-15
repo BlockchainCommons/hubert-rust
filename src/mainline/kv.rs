@@ -115,18 +115,23 @@ impl KvStore for MainlineDhtKv {
         &self,
         arid: &ARID,
         envelope: &Envelope,
+        ttl_seconds: Option<u64>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+        self.put_impl(arid, envelope, ttl_seconds)
+            .await
+            .map_err(|e| {
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn get(
         &self,
         arid: &ARID,
+        timeout_seconds: Option<u64>,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
-        self.get_impl(arid).await.map_err(|e| {
+        // Polls DHT with specified timeout
+        self.get_impl(arid, timeout_seconds).await.map_err(|e| {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })
     }
@@ -147,6 +152,7 @@ impl MainlineDhtKv {
         &self,
         arid: &ARID,
         envelope: &Envelope,
+        _ttl_seconds: Option<u64>, // Ignored - DHT has no TTL support
     ) -> Result<String, PutError> {
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
@@ -184,22 +190,40 @@ impl MainlineDhtKv {
     async fn get_impl(
         &self,
         arid: &ARID,
+        timeout_seconds: Option<u64>,
     ) -> Result<Option<Envelope>, GetError> {
+        use tokio::time::{Duration, Instant, sleep};
+
         // Derive public key from ARID
         let signing_key = Self::derive_signing_key(arid);
         let pubkey = signing_key.verifying_key().to_bytes();
         let salt_opt = self.salt.as_deref();
 
-        // Get most recent mutable item
-        let item = self.dht.get_mutable_most_recent(&pubkey, salt_opt).await;
+        let timeout = timeout_seconds.unwrap_or(30); // Default 30 seconds
+        let deadline = Instant::now() + Duration::from_secs(timeout);
+        let poll_interval = Duration::from_millis(500);
 
-        if let Some(mutable_item) = item {
-            // Deserialize envelope from value
-            let envelope =
-                Envelope::try_from_cbor_data(mutable_item.value().to_vec())?;
-            Ok(Some(envelope))
-        } else {
-            Ok(None)
+        loop {
+            // Get most recent mutable item
+            let item =
+                self.dht.get_mutable_most_recent(&pubkey, salt_opt).await;
+
+            if let Some(mutable_item) = item {
+                // Deserialize envelope from value
+                let envelope = Envelope::try_from_cbor_data(
+                    mutable_item.value().to_vec(),
+                )?;
+                return Ok(Some(envelope));
+            }
+
+            // Not found yet - check if we should keep polling
+            if Instant::now() >= deadline {
+                // Timeout reached
+                return Ok(None);
+            }
+
+            // Wait before retrying
+            sleep(poll_interval).await;
         }
     }
 

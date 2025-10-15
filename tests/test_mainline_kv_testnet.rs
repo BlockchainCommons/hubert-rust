@@ -50,3 +50,37 @@ async fn mainline_concurrent_operations() {
     let store2 = Arc::new(MainlineDhtKv::new().await.unwrap());
     common::kv_tests::test_concurrent_operations(store1, store2).await;
 }
+
+#[tokio::test]
+async fn mainline_get_timeout() {
+    use bc_components::ARID;
+    use hubert::KvStore;
+    use tokio::time::Instant;
+
+    let _testnet = Testnet::new_async(5).await.unwrap();
+    let store = MainlineDhtKv::new().await.unwrap();
+
+    let arid = ARID::new(); // Non-existent ARID
+
+    // Measure time to timeout (should be ~2 seconds)
+    let start = Instant::now();
+    let result = store.get(&arid, Some(2)).await;
+    let elapsed = start.elapsed();
+
+    // Should return None (not found) after timeout
+    assert!(
+        result.is_ok(),
+        "Get should succeed (not error) even on timeout"
+    );
+    assert!(
+        result.unwrap().is_none(),
+        "Should return None after timeout"
+    );
+
+    // Verify timeout was respected (allow some margin)
+    assert!(
+        elapsed.as_secs() >= 2 && elapsed.as_secs() <= 3,
+        "Timeout should be ~2 seconds, was {} seconds",
+        elapsed.as_secs()
+    );
+}

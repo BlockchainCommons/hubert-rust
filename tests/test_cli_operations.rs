@@ -7,9 +7,7 @@ mod cli_common;
 use cli_common::*;
 
 /// Helper to ensure tags are registered (can be called multiple times safely)
-fn ensure_tags_registered() {
-    bc_components::register_tags();
-}
+fn ensure_tags_registered() { bc_components::register_tags(); }
 
 /// Test basic put and get roundtrip with mainline DHT
 ///
