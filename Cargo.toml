@@ -3,11 +3,16 @@ name = "hubert"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "hubert"
+path = "src/bin/hubert.rs"
+
 [dependencies]
 bc-crypto = "^0.10.0"
 dcbor = { version = "^0.23.0", features = ["multithreaded"] }
 bc-components = "^0.25.0"
 bc-envelope = "^0.34.0"
+bc-ur = "^0.13.0"
 bc-xid = "^0.13.0"
 gstp = "^0.10.0"
 known-values = "^0.8.0"
@@ -17,9 +22,12 @@ ipfs-api-prelude = "0.6.0"
 mainline = "6"
 thiserror = "2"
 hex = "0.4"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }
 futures-util = "0.3"
 async-trait = "0.1"
+clap = { version = "^4.4.3", features = ["derive", "unstable-styles"] }
+anyhow = "^1.0.0"
+reqwest = "0.12"
 
 [dev-dependencies]
 futures-util = "0.3"
@@ -27,3 +35,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 anyhow = "1"
 chrono = "0.4"
 reqwest = "0.12"
+assert_cmd = "2"
+bc-components = "^0.25.0"
+bc-envelope = "^0.34.0"
+hex = "0.4"

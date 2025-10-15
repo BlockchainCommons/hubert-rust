@@ -127,6 +127,224 @@ This enables applications to send compact control messages via DHT while support
 - **Auditable**: All messages cryptographically verifiable
 - **Cost-Free**: No fees for using public networks (may pin IPFS content locally)
 
+## Usage
+
+Hubert can be used both as a **Rust library** for building distributed applications and as a **command-line tool** for interactive storage operations.
+
+### As a Rust Library
+
+Add Hubert to your `Cargo.toml`:
+
+```toml
+[dependencies]
+hubert = "0.1.0"
+bc-components = "^0.25.0"
+bc-envelope = "^0.34.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+#### Basic Example: Mainline DHT Storage
+
+```rust
+use bc_components::ARID;
+use bc_envelope::Envelope;
+use hubert::{KvStore, mainline::MainlineDhtKv};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a Mainline DHT store
+    let store = MainlineDhtKv::new().await?;
+
+    // Generate an ARID for this storage location
+    let arid = ARID::new();
+
+    // Create an envelope
+    let envelope = Envelope::new("Hello, Hubert!");
+
+    // Store the envelope (write-once)
+    store.put(&arid, &envelope).await?;
+
+    // Share the ARID with other parties via secure channel
+    // (Signal, QR code, GSTP message, etc.)
+    println!("ARID: {}", arid.ur_string());
+
+    // Retrieve the envelope
+    if let Some(retrieved) = store.get(&arid).await? {
+        println!("Retrieved: {}", retrieved);
+    }
+
+    Ok(())
+}
+```
+
+#### Example: IPFS Storage
+
+```rust
+use bc_components::ARID;
+use bc_envelope::Envelope;
+use hubert::{KvStore, ipfs::IpfsKv};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create an IPFS store (requires running Kubo daemon)
+    let store = IpfsKv::new("http://127.0.0.1:5001");
+
+    let arid = ARID::new();
+    let envelope = Envelope::new("Large data payload");
+
+    // Store using IPFS (supports up to 10 MB)
+    store.put(&arid, &envelope).await?;
+
+    // Retrieve
+    if let Some(retrieved) = store.get(&arid).await? {
+        println!("Retrieved from IPFS: {}", retrieved);
+    }
+
+    Ok(())
+}
+```
+
+#### KvStore Trait
+
+Both `MainlineDhtKv` and `IpfsKv` implement the `KvStore` trait:
+
+```rust
+use bc_components::ARID;
+use bc_envelope::Envelope;
+use hubert::KvStore;
+
+async fn store_envelope(
+    store: &impl KvStore,
+    arid: &ARID,
+    envelope: &Envelope,
+) -> Result<(), Box<dyn std::error::Error>> {
+    store.put(arid, envelope).await?;
+    Ok(())
+}
+```
+
+This allows you to write storage-backend-agnostic code and swap implementations as needed.
+
+#### Write-Once Semantics
+
+All storage backends enforce write-once semantics. Attempting to write to an existing ARID will fail:
+
+```rust
+use hubert::mainline::PutError;
+
+// First write succeeds
+store.put(&arid, &envelope1).await?;
+
+// Second write to same ARID fails
+match store.put(&arid, &envelope2).await {
+    Err(PutError::AlreadyExists { .. }) => {
+        println!("ARID already exists");
+    }
+    _ => {}
+}
+```
+
+#### Error Handling
+
+Each backend has specific error types:
+
+```rust
+use hubert::mainline::{PutError, GetError};
+
+match store.put(&arid, &envelope).await {
+    Ok(_) => println!("Stored successfully"),
+    Err(PutError::AlreadyExists { key }) => {
+        println!("Key {} already exists", key);
+    }
+    Err(PutError::ValueTooLarge { size }) => {
+        println!("Value too large: {} bytes", size);
+    }
+    Err(e) => println!("Error: {}", e),
+}
+```
+
+### As a Command-Line Tool
+
+Hubert includes a `hubert` CLI for storing and retrieving Gordian Envelopes using distributed storage backends.
+
+#### Installation
+
+```bash
+# From source
+cd hubert
+cargo install --path .
+
+# Or run directly
+cargo build --bin hubert
+./target/debug/hubert --help
+```
+
+#### Usage
+
+The CLI supports four commands:
+
+**Generate an ARID**
+
+```bash
+# Generate a new ARID for use as a storage key
+hubert generate arid
+```
+
+Example output: `ur:arid/hdcxjelehfmtuoosqzjypfgasbntjlsnihrhgepsdensolzmhgfyfzcptydeknatfmnloncmadva`
+
+**Check Backend Availability**
+
+```bash
+# Check if Mainline DHT is available (default)
+hubert check
+
+# Check if IPFS daemon is running
+hubert check --storage ipfs
+```
+
+**Store an Envelope**
+
+```bash
+# Store using Mainline DHT (default, ≤1 KB)
+hubert put <ur:arid> <ur:envelope>
+
+# Store using IPFS (up to 10 MB)
+hubert put --storage ipfs <ur:arid> <ur:envelope>
+```
+
+Example:
+```bash
+# Generate an ARID and envelope
+ARID=$(hubert generate arid)
+ENVELOPE=$(envelope subject type string "Hello, Hubert!")
+
+# Store the envelope
+hubert put "$ARID" "$ENVELOPE"
+```
+
+**Retrieve an Envelope**
+
+```bash
+# Retrieve using Mainline DHT (default)
+hubert get <ur:arid>
+
+# Retrieve using IPFS
+hubert get --storage ipfs <ur:arid>
+```
+
+The retrieved envelope is output in `ur:envelope` format.
+
+#### CLI Options
+
+- `--storage`, `-s`: Choose storage backend
+  - `mainline` (default): BitTorrent Mainline DHT (fast, ≤1 KB messages)
+  - `ipfs`: IPFS (large capacity, up to 10 MB messages)
+
+#### Requirements
+
+- **Mainline DHT**: No external daemon required
+- **IPFS**: Requires running Kubo daemon at `127.0.0.1:5001`
+
 ## Architecture Overview
 
 ```

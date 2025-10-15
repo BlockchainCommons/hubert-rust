@@ -13,8 +13,8 @@ use mainline::Dht;
 /// Requires internet connectivity and UDP access to DHT bootstrap nodes.
 /// Run with: cargo test --test test_mainline_kv_mainnet -- --nocapture
 ///
-/// Note: Mainnet tests are slower than testnet tests due to network propagation.
-/// Helper to check if we can connect to the mainline DHT
+/// Note: Mainnet tests are slower than testnet tests due to network
+/// propagation. Helper to check if we can connect to the mainline DHT
 async fn check_mainnet_connectivity() -> bool {
     // Try to create a DHT client and bootstrap
     match Dht::client() {

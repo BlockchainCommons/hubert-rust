@@ -31,7 +31,7 @@ use crate::{KvStore, arid_derivation::derive_ipfs_key_name};
 /// ```no_run
 /// use bc_components::ARID;
 /// use bc_envelope::Envelope;
-/// use hubert::{ipfs::IpfsKv, KvStore};
+/// use hubert::{KvStore, ipfs::IpfsKv};
 ///
 /// # async fn example() {
 /// let store = IpfsKv::new("http://127.0.0.1:5001");

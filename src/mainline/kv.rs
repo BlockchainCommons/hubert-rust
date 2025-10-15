@@ -37,7 +37,7 @@ use crate::{KvStore, arid_derivation::derive_mainline_key};
 /// ```no_run
 /// use bc_components::ARID;
 /// use bc_envelope::Envelope;
-/// use hubert::{mainline::MainlineDhtKv, KvStore};
+/// use hubert::{KvStore, mainline::MainlineDhtKv};
 ///
 /// # async fn example() {
 /// let store = MainlineDhtKv::new().await.unwrap();
