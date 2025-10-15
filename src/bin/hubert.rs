@@ -18,6 +18,14 @@ struct Cli {
     #[arg(long, short, global = true, default_value = "mainline")]
     storage: StorageBackend,
 
+    /// Server/IPFS host (for --storage server or --storage ipfs)
+    #[arg(long, global = true)]
+    host: Option<String>,
+
+    /// Port (for --storage server, --storage ipfs, or server command)
+    #[arg(long, global = true)]
+    port: Option<u16>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -28,6 +36,8 @@ enum StorageBackend {
     Mainline,
     /// IPFS (large capacity, up to 10 MB messages)
     Ipfs,
+    /// Hubert HTTP server (centralized coordination)
+    Server,
 }
 
 #[derive(Debug, Subcommand)]
@@ -64,11 +74,7 @@ enum Commands {
     Check,
 
     /// Start the Hubert HTTP server
-    Server {
-        /// Port to listen on
-        #[arg(long, short, default_value = "45678")]
-        port: u16,
-    },
+    Server,
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,24 +111,25 @@ async fn check_mainline() -> Result<()> {
     }
 }
 
-async fn check_ipfs() -> Result<()> {
+async fn check_ipfs(port: u16) -> Result<()> {
     let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/api/v0/version", port);
     match client
-        .post("http://127.0.0.1:5001/api/v0/version")
+        .post(&url)
         .timeout(std::time::Duration::from_secs(2))
         .send()
         .await
     {
         Ok(response) => {
             if response.status().is_success() {
-                println!("✓ IPFS is available at 127.0.0.1:5001");
+                println!("✓ IPFS is available at 127.0.0.1:{}", port);
                 Ok(())
             } else {
                 bail!("✗ IPFS daemon returned error: {}", response.status())
             }
         }
         Err(e) => {
-            bail!("✗ IPFS is not available at 127.0.0.1:5001: {}", e)
+            bail!("✗ IPFS is not available at 127.0.0.1:{}: {}", port, e)
         }
     }
 }
@@ -137,8 +144,9 @@ async fn put_mainline(arid: &ARID, envelope: &Envelope) -> Result<()> {
     Ok(())
 }
 
-async fn put_ipfs(arid: &ARID, envelope: &Envelope) -> Result<()> {
-    let store = IpfsKv::new("http://127.0.0.1:5001");
+async fn put_ipfs(arid: &ARID, envelope: &Envelope, port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{}", port);
+    let store = IpfsKv::new(&url);
     store
         .put(arid, envelope, None) // No TTL (use IPFS default of 24h)
         .await
@@ -155,8 +163,47 @@ async fn get_mainline(arid: &ARID, timeout: u64) -> Result<Option<Envelope>> {
         .map_err(|e| anyhow!("{}", e))
 }
 
-async fn get_ipfs(arid: &ARID, timeout: u64) -> Result<Option<Envelope>> {
-    let store = IpfsKv::new("http://127.0.0.1:5001");
+async fn get_ipfs(
+    arid: &ARID,
+    timeout: u64,
+    port: u16,
+) -> Result<Option<Envelope>> {
+    let url = format!("http://127.0.0.1:{}", port);
+    let store = IpfsKv::new(&url);
+    store
+        .get(arid, Some(timeout))
+        .await
+        .map_err(|e| anyhow!("{}", e))
+}
+
+async fn put_server(
+    host: &str,
+    port: u16,
+    arid: &ARID,
+    envelope: &Envelope,
+) -> Result<()> {
+    use hubert::server::ServerKv;
+
+    let url = format!("http://{}:{}", host, port);
+    let store = ServerKv::new(&url);
+    store
+        .put(arid, envelope, None) // No TTL (use server default)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
+    println!("✓ Stored envelope at ARID");
+    Ok(())
+}
+
+async fn get_server(
+    host: &str,
+    port: u16,
+    arid: &ARID,
+    timeout: u64,
+) -> Result<Option<Envelope>> {
+    use hubert::server::ServerKv;
+
+    let url = format!("http://{}:{}", host, port);
+    let store = ServerKv::new(&url);
     store
         .get(arid, Some(timeout))
         .await
@@ -169,6 +216,35 @@ async fn main() -> Result<()> {
     bc_components::register_tags();
 
     let cli = Cli::parse();
+
+    // Validate port/host usage based on storage backend (skip for Server
+    // command)
+    if !matches!(cli.command, Commands::Server) {
+        match cli.storage {
+            StorageBackend::Mainline => {
+                if cli.port.is_some() {
+                    bail!(
+                        "--port option is not supported for --storage mainline"
+                    );
+                }
+                if cli.host.is_some() {
+                    bail!(
+                        "--host option is not supported for --storage mainline"
+                    );
+                }
+            }
+            StorageBackend::Ipfs => {
+                if cli.host.is_some() {
+                    bail!(
+                        "--host option is not supported for --storage ipfs (always uses 127.0.0.1)"
+                    );
+                }
+            }
+            StorageBackend::Server => {
+                // host and port are allowed
+            }
+        }
+    }
 
     match cli.command {
         Commands::Generate { generate_type } => match generate_type {
@@ -186,7 +262,15 @@ async fn main() -> Result<()> {
                 StorageBackend::Mainline => {
                     put_mainline(&arid, &envelope).await?
                 }
-                StorageBackend::Ipfs => put_ipfs(&arid, &envelope).await?,
+                StorageBackend::Ipfs => {
+                    let port = cli.port.unwrap_or(5001);
+                    put_ipfs(&arid, &envelope, port).await?
+                }
+                StorageBackend::Server => {
+                    let host = cli.host.as_deref().unwrap_or("127.0.0.1");
+                    let port = cli.port.unwrap_or(45678);
+                    put_server(host, port, &arid, &envelope).await?
+                }
             }
         }
 
@@ -197,7 +281,15 @@ async fn main() -> Result<()> {
                 StorageBackend::Mainline => {
                     get_mainline(&arid, timeout).await?
                 }
-                StorageBackend::Ipfs => get_ipfs(&arid, timeout).await?,
+                StorageBackend::Ipfs => {
+                    let port = cli.port.unwrap_or(5001);
+                    get_ipfs(&arid, timeout, port).await?
+                }
+                StorageBackend::Server => {
+                    let host = cli.host.as_deref().unwrap_or("127.0.0.1");
+                    let port = cli.port.unwrap_or(45678);
+                    get_server(host, port, &arid, timeout).await?
+                }
             };
 
             match envelope {
@@ -212,17 +304,68 @@ async fn main() -> Result<()> {
 
         Commands::Check => match cli.storage {
             StorageBackend::Mainline => check_mainline().await?,
-            StorageBackend::Ipfs => check_ipfs().await?,
+            StorageBackend::Ipfs => {
+                let port = cli.port.unwrap_or(5001);
+                check_ipfs(port).await?
+            }
+            StorageBackend::Server => {
+                // Check if server is reachable
+                use hubert::server::ServerKv;
+                use tokio::time::{Duration, timeout};
+
+                let host = cli.host.as_deref().unwrap_or("127.0.0.1");
+                let port = cli.port.unwrap_or(45678);
+                let url = format!("http://{}:{}", host, port);
+                let store = ServerKv::new(&url);
+                // Try to get a non-existent ARID to check connectivity
+                let test_arid = ARID::new();
+
+                // Wrap the entire check in a 2-second timeout
+                match timeout(
+                    Duration::from_secs(2),
+                    store.get(&test_arid, Some(1)),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {
+                        println!("✓ Server is available at {}:{}", host, port);
+                    }
+                    Ok(Err(e)) => {
+                        bail!(
+                            "✗ Server is not available at {}:{}: {}",
+                            host,
+                            port,
+                            e
+                        )
+                    }
+                    Err(_) => {
+                        bail!(
+                            "✗ Server is not available at {}:{}: connection timeout",
+                            host,
+                            port
+                        )
+                    }
+                }
+            }
         },
 
-        Commands::Server { port } => {
+        Commands::Server => {
             use hubert::server::{Server, ServerConfig};
 
+            // Validate that --storage is not used with server command
+            if matches!(cli.storage, StorageBackend::Server) {
+                bail!(
+                    "--storage server is for clients using the server, not for running the server itself. Use: hubert server"
+                );
+            }
+
+            let port = cli.port.unwrap_or(45678);
             let config = ServerConfig {
                 port,
-                ..Default::default() // Use default TTL settings
+                max_ttl: 86400, // 24 hours
             };
             let server = Server::new(config);
+            println!("Starting Hubert server on port {}", port);
             server.run().await.map_err(|e| anyhow!("{}", e))?;
         }
     }
