@@ -63,6 +63,10 @@ enum Commands {
         /// Envelope value (ur:envelope format)
         #[arg(value_name = "ENVELOPE")]
         envelope: String,
+
+        /// Time-to-live in seconds (only for --storage server)
+        #[arg(long)]
+        ttl: Option<u64>,
     },
 
     /// Retrieve an envelope by ARID
@@ -207,6 +211,7 @@ async fn put_server(
     port: u16,
     arid: &ARID,
     envelope: &Envelope,
+    ttl: Option<u64>,
     verbose: bool,
 ) -> Result<()> {
     use hubert::server::ServerKv;
@@ -214,7 +219,7 @@ async fn put_server(
     let url = format!("http://{}:{}", host, port);
     let store = ServerKv::new(&url);
     store
-        .put(arid, envelope, None, verbose) // No TTL (use server default)
+        .put(arid, envelope, ttl, verbose)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
@@ -282,22 +287,32 @@ async fn main() -> Result<()> {
             }
         },
 
-        Commands::Put { arid, envelope } => {
+        Commands::Put { arid, envelope, ttl } => {
             let arid = parse_arid(&arid)?;
             let envelope = parse_envelope(&envelope)?;
 
             match cli.storage {
                 StorageBackend::Mainline => {
+                    if ttl.is_some() {
+                        bail!(
+                            "--ttl option is only supported for --storage server"
+                        );
+                    }
                     put_mainline(&arid, &envelope, cli.verbose).await?
                 }
                 StorageBackend::Ipfs => {
+                    if ttl.is_some() {
+                        bail!(
+                            "--ttl option is only supported for --storage server"
+                        );
+                    }
                     let port = cli.port.unwrap_or(5001);
                     put_ipfs(&arid, &envelope, port, cli.verbose).await?
                 }
                 StorageBackend::Server => {
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                     let port = cli.port.unwrap_or(45678);
-                    put_server(host, port, &arid, &envelope, cli.verbose)
+                    put_server(host, port, &arid, &envelope, ttl, cli.verbose)
                         .await?
                 }
             }

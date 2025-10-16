@@ -81,14 +81,46 @@ impl SqliteKv {
                     .as_secs() as i64;
 
                 if let Ok(conn) = connection.lock() {
-                    let query = "DELETE FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?";
-                    let mut stmt = match conn.prepare(query) {
-                        Ok(stmt) => stmt,
-                        Err(_) => continue,
+                    // First collect the ARIDs that will be deleted
+                    let select_query = "SELECT arid FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?";
+                    let arids: Vec<String> = match conn.prepare(select_query) {
+                        Ok(mut stmt) => {
+                            if stmt.bind((1, now)).is_ok() {
+                                let mut arids = Vec::new();
+                                while let Ok(State::Row) = stmt.next() {
+                                    if let Ok(arid) = stmt.read::<String, _>(0)
+                                    {
+                                        arids.push(arid);
+                                    }
+                                }
+                                arids
+                            } else {
+                                Vec::new()
+                            }
+                        }
+                        Err(_) => Vec::new(),
                     };
 
-                    if stmt.bind((1, now)).is_ok() {
-                        let _ = stmt.next();
+                    if !arids.is_empty() {
+                        // Now delete them
+                        let delete_query = "DELETE FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?";
+                        let mut stmt = match conn.prepare(delete_query) {
+                            Ok(stmt) => stmt,
+                            Err(_) => continue,
+                        };
+
+                        if stmt.bind((1, now)).is_ok() {
+                            let _ = stmt.next();
+                            use crate::logging::verbose_println;
+                            let count = arids.len();
+                            let arid_list = arids.join(" ");
+                            verbose_println(&format!(
+                                "Pruned {} expired {}: {}",
+                                count,
+                                if count == 1 { "entry" } else { "entries" },
+                                arid_list
+                            ));
+                        }
                     }
                 }
             }

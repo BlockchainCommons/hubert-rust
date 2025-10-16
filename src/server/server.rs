@@ -182,19 +182,25 @@ impl ServerState {
 
         let ttl_seconds = ttl.as_secs();
 
+        let result = self.storage.put_sync(arid, envelope, ttl_seconds);
+
         if self.config.verbose {
-            let ip_str = client_ip
-                .map(|ip| format!("{}: ", ip))
-                .unwrap_or_else(String::new);
+            let ip_str =
+                client_ip.map(|ip| format!("{}: ", ip)).unwrap_or_default();
+            let status = match &result {
+                Ok(_) => "OK".to_string(),
+                Err(e) => format!("ERROR: {}", e),
+            };
             verbose_println(&format!(
-                "{}PUT {} (TTL {}s)",
+                "{}PUT {} (TTL {}s) {}",
                 ip_str,
                 arid.ur_string(),
-                ttl_seconds
+                ttl_seconds,
+                status
             ));
         }
 
-        self.storage.put_sync(arid, envelope, ttl_seconds)
+        result
     }
 
     fn get(
@@ -204,14 +210,21 @@ impl ServerState {
     ) -> Option<Envelope> {
         use crate::logging::verbose_println;
 
+        let result = self.storage.get_sync(arid);
+
         if self.config.verbose {
-            let ip_str = client_ip
-                .map(|ip| format!("{}: ", ip))
-                .unwrap_or_else(String::new);
-            verbose_println(&format!("{}GET {}", ip_str, arid.ur_string()));
+            let ip_str =
+                client_ip.map(|ip| format!("{}: ", ip)).unwrap_or_default();
+            let status = if result.is_some() { "OK" } else { "NOT_FOUND" };
+            verbose_println(&format!(
+                "{}GET {} {}",
+                ip_str,
+                arid.ur_string(),
+                status
+            ));
         }
 
-        self.storage.get_sync(arid)
+        result
     }
 }
 
