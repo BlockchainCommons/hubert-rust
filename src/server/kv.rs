@@ -23,10 +23,10 @@ use crate::KvStore;
 /// let envelope = Envelope::new("Hello, Server!");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope, None).await.unwrap();
+/// store.put(&arid, &envelope, None, false).await.unwrap();
 ///
-/// // Get envelope
-/// if let Some(retrieved) = store.get(&arid, None).await.unwrap() {
+/// // Get envelope with verbose logging
+/// if let Some(retrieved) = store.get(&arid, None, true).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
 /// # }
@@ -60,7 +60,7 @@ impl ServerKv {
         ttl_seconds: u64,
     ) -> Result<(), PutError> {
         use crate::KvStore;
-        self.put(arid, envelope, Some(ttl_seconds))
+        self.put(arid, envelope, Some(ttl_seconds), false)
             .await
             .map(|_| ())
             .map_err(|e| PutError::ServerError(e.to_string()))
@@ -74,8 +74,15 @@ impl KvStore for ServerKv {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::logging::{verbose_newline, verbose_println};
+
         bc_components::register_tags();
+
+        if verbose {
+            verbose_println("Starting server put operation");
+        }
 
         // Format body with optional TTL on third line
         let body = if let Some(ttl) = ttl_seconds {
@@ -83,6 +90,10 @@ impl KvStore for ServerKv {
         } else {
             format!("{}\n{}", arid.ur_string(), envelope.ur_string())
         };
+
+        if verbose {
+            verbose_println("Sending PUT request to server");
+        }
 
         let response = self
             .client
@@ -95,31 +106,58 @@ impl KvStore for ServerKv {
                     as Box<dyn std::error::Error + Send + Sync>
             })?;
 
-        match response.status() {
+        let result = match response.status() {
             reqwest::StatusCode::OK => Ok("Stored successfully".to_string()),
             reqwest::StatusCode::CONFLICT => {
-                Err(Box::new(PutError::AlreadyExists))
+                Err(Box::new(PutError::AlreadyExists)
+                    as Box<dyn std::error::Error + Send + Sync>)
             }
             _ => {
                 let error_msg = response.text().await.unwrap_or_default();
-                Err(Box::new(PutError::ServerError(error_msg)))
+                Err(Box::new(PutError::ServerError(error_msg))
+                    as Box<dyn std::error::Error + Send + Sync>)
             }
+        };
+
+        if verbose {
+            if result.is_ok() {
+                verbose_println("Server put operation completed");
+            } else {
+                verbose_println("Server put operation failed");
+            }
+            verbose_newline();
         }
+
+        result
     }
 
     async fn get(
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
         use tokio::time::{Duration, Instant, sleep};
 
+        use crate::logging::{
+            verbose_newline, verbose_print_dot, verbose_println,
+        };
+
         bc_components::register_tags();
+
+        if verbose {
+            verbose_println("Starting server get operation");
+        }
 
         let timeout = timeout_seconds.unwrap_or(30); // Default 30 seconds
         let deadline = Instant::now() + Duration::from_secs(timeout);
-        let poll_interval = Duration::from_millis(500);
+        // Changed to 1000ms for verbose mode polling
+        let poll_interval = Duration::from_millis(1000);
+
+        if verbose {
+            verbose_println("Polling server for value");
+        }
 
         loop {
             let body = arid.ur_string();
@@ -137,6 +175,10 @@ impl KvStore for ServerKv {
 
             match response.status() {
                 reqwest::StatusCode::OK => {
+                    if verbose {
+                        verbose_newline();
+                        verbose_println("Value found on server");
+                    }
                     let envelope_str = response.text().await.map_err(|e| {
                         Box::new(GetError::NetworkError(e.to_string()))
                             as Box<dyn std::error::Error + Send + Sync>
@@ -146,15 +188,32 @@ impl KvStore for ServerKv {
                             Box::new(GetError::ParseError(e.to_string()))
                                 as Box<dyn std::error::Error + Send + Sync>
                         })?;
+
+                    if verbose {
+                        verbose_println("Server get operation completed");
+                        verbose_newline();
+                    }
+
                     return Ok(Some(envelope));
                 }
                 reqwest::StatusCode::NOT_FOUND => {
                     // Not found yet - check if we should keep polling
                     if Instant::now() >= deadline {
                         // Timeout reached
+                        if verbose {
+                            verbose_newline();
+                            verbose_println("Timeout reached, value not found");
+                            verbose_newline();
+                        }
                         return Ok(None);
                     }
-                    // Wait before retrying
+
+                    // Print polling dot if verbose
+                    if verbose {
+                        verbose_print_dot();
+                    }
+
+                    // Wait before retrying (now 1000ms)
                     sleep(poll_interval).await;
                 }
                 _ => {
@@ -169,7 +228,7 @@ impl KvStore for ServerKv {
         &self,
         arid: &ARID,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        // Use a short timeout for exists check (1 second)
-        Ok(self.get(arid, Some(1)).await?.is_some())
+        // Use a short timeout for exists check (1 second), no verbose
+        Ok(self.get(arid, Some(1), false).await?.is_some())
     }
 }

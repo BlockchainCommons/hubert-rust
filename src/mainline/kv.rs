@@ -45,10 +45,10 @@ use crate::{KvStore, arid_derivation::derive_mainline_key};
 /// let envelope = Envelope::new("Small message");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope, None).await.unwrap();
+/// store.put(&arid, &envelope, None, false).await.unwrap();
 ///
-/// // Get envelope
-/// if let Some(retrieved) = store.get(&arid, None).await.unwrap() {
+/// // Get envelope with verbose logging
+/// if let Some(retrieved) = store.get(&arid, None, true).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
 /// # }
@@ -116,8 +116,9 @@ impl KvStore for MainlineDhtKv {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope, ttl_seconds)
+        self.put_impl(arid, envelope, ttl_seconds, verbose)
             .await
             .map_err(|e| {
                 Box::new(e) as Box<dyn std::error::Error + Send + Sync>
@@ -128,12 +129,15 @@ impl KvStore for MainlineDhtKv {
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
         // Polls DHT with specified timeout
-        self.get_impl(arid, timeout_seconds).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+        self.get_impl(arid, timeout_seconds, verbose)
+            .await
+            .map_err(|e| {
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn exists(
@@ -153,7 +157,14 @@ impl MainlineDhtKv {
         arid: &ARID,
         envelope: &Envelope,
         _ttl_seconds: Option<u64>, // Ignored - DHT has no TTL support
+        verbose: bool,
     ) -> Result<String, PutError> {
+        use crate::logging::{verbose_newline, verbose_println};
+
+        if verbose {
+            verbose_println("Starting Mainline DHT put operation");
+        }
+
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
 
@@ -162,12 +173,22 @@ impl MainlineDhtKv {
             return Err(PutError::ValueTooLarge { size: bytes.len() });
         }
 
+        if verbose {
+            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+        }
+
         // Derive signing key from ARID
+        if verbose {
+            verbose_println("Deriving DHT signing key from ARID");
+        }
         let signing_key = Self::derive_signing_key(arid);
         let pubkey = signing_key.verifying_key().to_bytes();
         let salt_opt = self.salt.as_deref();
 
         // Check if already exists (write-once semantics)
+        if verbose {
+            verbose_println("Checking for existing value (write-once check)");
+        }
         if self
             .dht
             .get_mutable_most_recent(&pubkey, salt_opt)
@@ -178,10 +199,21 @@ impl MainlineDhtKv {
         }
 
         // Create mutable item with seq=1 (first write)
+        if verbose {
+            verbose_println("Creating mutable DHT item");
+        }
         let item = MutableItem::new(signing_key, &bytes, 1, salt_opt);
 
         // Put to DHT (no CAS since we verified it doesn't exist)
+        if verbose {
+            verbose_println("Putting value to DHT");
+        }
         self.dht.put_mutable(item, None).await?;
+
+        if verbose {
+            verbose_println("Mainline DHT put operation completed");
+            verbose_newline();
+        }
 
         Ok(format!("dht://{}", hex::encode(pubkey)))
     }
@@ -191,17 +223,34 @@ impl MainlineDhtKv {
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, GetError> {
         use tokio::time::{Duration, Instant, sleep};
 
+        use crate::logging::{
+            verbose_newline, verbose_print_dot, verbose_println,
+        };
+
+        if verbose {
+            verbose_println("Starting Mainline DHT get operation");
+        }
+
         // Derive public key from ARID
+        if verbose {
+            verbose_println("Deriving DHT public key from ARID");
+        }
         let signing_key = Self::derive_signing_key(arid);
         let pubkey = signing_key.verifying_key().to_bytes();
         let salt_opt = self.salt.as_deref();
 
         let timeout = timeout_seconds.unwrap_or(30); // Default 30 seconds
         let deadline = Instant::now() + Duration::from_secs(timeout);
-        let poll_interval = Duration::from_millis(500);
+        // Changed to 1000ms for verbose mode polling
+        let poll_interval = Duration::from_millis(1000);
+
+        if verbose {
+            verbose_println("Polling DHT for value");
+        }
 
         loop {
             // Get most recent mutable item
@@ -209,20 +258,40 @@ impl MainlineDhtKv {
                 self.dht.get_mutable_most_recent(&pubkey, salt_opt).await;
 
             if let Some(mutable_item) = item {
+                if verbose {
+                    verbose_newline();
+                    verbose_println("Value found in DHT");
+                }
                 // Deserialize envelope from value
                 let envelope = Envelope::try_from_cbor_data(
                     mutable_item.value().to_vec(),
                 )?;
+
+                if verbose {
+                    verbose_println("Mainline DHT get operation completed");
+                    verbose_newline();
+                }
+
                 return Ok(Some(envelope));
             }
 
             // Not found yet - check if we should keep polling
             if Instant::now() >= deadline {
                 // Timeout reached
+                if verbose {
+                    verbose_newline();
+                    verbose_println("Timeout reached, value not found");
+                    verbose_newline();
+                }
                 return Ok(None);
             }
 
-            // Wait before retrying
+            // Print polling dot if verbose
+            if verbose {
+                verbose_print_dot();
+            }
+
+            // Wait before retrying (now 1000ms)
             sleep(poll_interval).await;
         }
     }

@@ -26,6 +26,10 @@ struct Cli {
     #[arg(long, global = true)]
     port: Option<u16>,
 
+    /// Enable verbose output with timestamps
+    #[arg(long, short, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -134,31 +138,44 @@ async fn check_ipfs(port: u16) -> Result<()> {
     }
 }
 
-async fn put_mainline(arid: &ARID, envelope: &Envelope) -> Result<()> {
+async fn put_mainline(
+    arid: &ARID,
+    envelope: &Envelope,
+    verbose: bool,
+) -> Result<()> {
     let store = MainlineDhtKv::new().await.map_err(|e| anyhow!("{}", e))?;
     store
-        .put(arid, envelope, None) // No TTL for mainline (not supported)
+        .put(arid, envelope, None, verbose) // No TTL for mainline (not supported)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
     Ok(())
 }
 
-async fn put_ipfs(arid: &ARID, envelope: &Envelope, port: u16) -> Result<()> {
+async fn put_ipfs(
+    arid: &ARID,
+    envelope: &Envelope,
+    port: u16,
+    verbose: bool,
+) -> Result<()> {
     let url = format!("http://127.0.0.1:{}", port);
     let store = IpfsKv::new(&url);
     store
-        .put(arid, envelope, None) // No TTL (use IPFS default of 24h)
+        .put(arid, envelope, None, verbose) // No TTL (use IPFS default of 24h)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
     Ok(())
 }
 
-async fn get_mainline(arid: &ARID, timeout: u64) -> Result<Option<Envelope>> {
+async fn get_mainline(
+    arid: &ARID,
+    timeout: u64,
+    verbose: bool,
+) -> Result<Option<Envelope>> {
     let store = MainlineDhtKv::new().await.map_err(|e| anyhow!("{}", e))?;
     store
-        .get(arid, Some(timeout))
+        .get(arid, Some(timeout), verbose)
         .await
         .map_err(|e| anyhow!("{}", e))
 }
@@ -167,11 +184,12 @@ async fn get_ipfs(
     arid: &ARID,
     timeout: u64,
     port: u16,
+    verbose: bool,
 ) -> Result<Option<Envelope>> {
     let url = format!("http://127.0.0.1:{}", port);
     let store = IpfsKv::new(&url);
     store
-        .get(arid, Some(timeout))
+        .get(arid, Some(timeout), verbose)
         .await
         .map_err(|e| anyhow!("{}", e))
 }
@@ -181,13 +199,14 @@ async fn put_server(
     port: u16,
     arid: &ARID,
     envelope: &Envelope,
+    verbose: bool,
 ) -> Result<()> {
     use hubert::server::ServerKv;
 
     let url = format!("http://{}:{}", host, port);
     let store = ServerKv::new(&url);
     store
-        .put(arid, envelope, None) // No TTL (use server default)
+        .put(arid, envelope, None, verbose) // No TTL (use server default)
         .await
         .map_err(|e| anyhow!("{}", e))?;
     println!("✓ Stored envelope at ARID");
@@ -199,13 +218,14 @@ async fn get_server(
     port: u16,
     arid: &ARID,
     timeout: u64,
+    verbose: bool,
 ) -> Result<Option<Envelope>> {
     use hubert::server::ServerKv;
 
     let url = format!("http://{}:{}", host, port);
     let store = ServerKv::new(&url);
     store
-        .get(arid, Some(timeout))
+        .get(arid, Some(timeout), verbose)
         .await
         .map_err(|e| anyhow!("{}", e))
 }
@@ -260,16 +280,17 @@ async fn main() -> Result<()> {
 
             match cli.storage {
                 StorageBackend::Mainline => {
-                    put_mainline(&arid, &envelope).await?
+                    put_mainline(&arid, &envelope, cli.verbose).await?
                 }
                 StorageBackend::Ipfs => {
                     let port = cli.port.unwrap_or(5001);
-                    put_ipfs(&arid, &envelope, port).await?
+                    put_ipfs(&arid, &envelope, port, cli.verbose).await?
                 }
                 StorageBackend::Server => {
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                     let port = cli.port.unwrap_or(45678);
-                    put_server(host, port, &arid, &envelope).await?
+                    put_server(host, port, &arid, &envelope, cli.verbose)
+                        .await?
                 }
             }
         }
@@ -279,16 +300,16 @@ async fn main() -> Result<()> {
 
             let envelope = match cli.storage {
                 StorageBackend::Mainline => {
-                    get_mainline(&arid, timeout).await?
+                    get_mainline(&arid, timeout, cli.verbose).await?
                 }
                 StorageBackend::Ipfs => {
                     let port = cli.port.unwrap_or(5001);
-                    get_ipfs(&arid, timeout, port).await?
+                    get_ipfs(&arid, timeout, port, cli.verbose).await?
                 }
                 StorageBackend::Server => {
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                     let port = cli.port.unwrap_or(45678);
-                    get_server(host, port, &arid, timeout).await?
+                    get_server(host, port, &arid, timeout, cli.verbose).await?
                 }
             };
 
@@ -323,7 +344,7 @@ async fn main() -> Result<()> {
                 // Wrap the entire check in a 2-second timeout
                 match timeout(
                     Duration::from_secs(2),
-                    store.get(&test_arid, Some(1)),
+                    store.get(&test_arid, Some(1), false),
                 )
                 .await
                 {
@@ -363,6 +384,7 @@ async fn main() -> Result<()> {
             let config = ServerConfig {
                 port,
                 max_ttl: 86400, // 24 hours
+                verbose: cli.verbose,
             };
             let server = Server::new(config);
             println!("Starting Hubert server on port {}", port);

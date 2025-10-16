@@ -1,6 +1,7 @@
 mod arid_derivation;
 pub mod ipfs;
 mod kv_store;
+pub mod logging;
 pub mod mainline;
 pub mod server;
 

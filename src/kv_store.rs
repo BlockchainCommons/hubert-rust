@@ -52,7 +52,7 @@ use bc_envelope::Envelope;
 ///     tokio::runtime::Runtime::new().unwrap().block_on(async {
 ///         let arid = ARID::new();
 ///         let env = Envelope::new("data");
-///         store1.put(&arid, &env, None).await
+///         store1.put(&arid, &env, None, false).await
 ///     })
 /// });
 /// # }
@@ -70,7 +70,7 @@ use bc_envelope::Envelope;
 ///
 /// // ERROR: Cannot spawn !Send future across threads
 /// tokio::spawn(async move {
-///     store.put(&arid, &env, None).await
+///     store.put(&arid, &env, None, false).await
 /// });
 /// # }
 /// ```
@@ -99,6 +99,7 @@ pub trait KvStore: Send + Sync {
     ///   - **Server**: Clamped to max_ttl if exceeded; uses max_ttl if None.
     ///     All entries expire (hubert is for coordination, not long-term
     ///     storage).
+    /// - `verbose`: If true, log operations with timestamps
     ///
     /// # Returns
     ///
@@ -119,11 +120,14 @@ pub trait KvStore: Send + Sync {
     /// let envelope = Envelope::new("Hello, Hubert!");
     ///
     /// // Store without TTL
-    /// let receipt = store.put(&arid, &envelope, None).await.unwrap();
+    /// let receipt = store.put(&arid, &envelope, None, false).await.unwrap();
     ///
-    /// // Store with 1 hour TTL
+    /// // Store with 1 hour TTL and verbose logging
     /// let arid2 = ARID::new();
-    /// let receipt2 = store.put(&arid2, &envelope, Some(3600)).await.unwrap();
+    /// let receipt2 = store
+    ///     .put(&arid2, &envelope, Some(3600), true)
+    ///     .await
+    ///     .unwrap();
     /// println!("Stored at: {}", receipt2);
     /// # }
     /// ```
@@ -132,6 +136,7 @@ pub trait KvStore: Send + Sync {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<String, Box<dyn Error + Send + Sync>>;
 
     /// Retrieve an envelope for the given ARID.
@@ -146,6 +151,8 @@ pub trait KvStore: Send + Sync {
     /// - `timeout_seconds`: Maximum time to wait for the envelope to appear. If
     ///   `None`, uses a backend-specific default (typically 30 seconds). After
     ///   timeout, returns `Ok(None)` rather than continuing to poll.
+    /// - `verbose`: If true, log operations with timestamps and print polling
+    ///   dots
     ///
     /// # Returns
     ///
@@ -159,8 +166,8 @@ pub trait KvStore: Send + Sync {
     /// # use hubert::KvStore;
     /// # use bc_components::ARID;
     /// # async fn example(store: &impl hubert::KvStore, arid: &ARID) {
-    /// // Wait up to 10 seconds for envelope to appear
-    /// match store.get(arid, Some(10)).await.unwrap() {
+    /// // Wait up to 10 seconds for envelope to appear with verbose logging
+    /// match store.get(arid, Some(10), true).await.unwrap() {
     ///     Some(envelope) => println!("Found: {}", envelope),
     ///     None => println!("Not found within timeout"),
     /// }
@@ -170,6 +177,7 @@ pub trait KvStore: Send + Sync {
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, Box<dyn Error + Send + Sync>>;
 
     /// Check if an envelope exists at the given ARID.

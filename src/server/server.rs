@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
@@ -7,7 +8,7 @@ use std::{
 use axum::{
     Router,
     body::Bytes,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
@@ -26,6 +27,8 @@ pub struct ServerConfig {
     /// If put() specifies None, this value will be used.
     /// Hubert is intended for coordination, not long-term storage.
     pub max_ttl: u64,
+    /// Enable verbose logging with timestamps
+    pub verbose: bool,
 }
 
 impl Default for ServerConfig {
@@ -33,13 +36,14 @@ impl Default for ServerConfig {
         Self {
             port: 45678,
             max_ttl: 86400, // 24 hours max (and default)
+            verbose: false,
         }
     }
 }
 /// Entry in the server storage.
 #[derive(Clone)]
 struct StorageEntry {
-    envelope_ur: String, // Store as UR string instead of Envelope
+    envelope_cbor: Vec<u8>, // Store as CBOR bytes (tagged #200)
     expires_at: Option<Instant>,
 }
 
@@ -63,11 +67,24 @@ impl ServerState {
         arid: ARID,
         envelope: Envelope,
         requested_ttl: Option<Duration>,
+        client_ip: Option<SocketAddr>,
     ) -> Result<(), String> {
+        use crate::logging::verbose_println;
+
         let mut storage = self.storage.write().unwrap();
 
         // Check if ARID already exists
         if storage.contains_key(&arid) {
+            if self.config.verbose {
+                let ip_str = client_ip
+                    .map(|ip| format!("{}: ", ip))
+                    .unwrap_or_else(|| "unknown: ".to_string());
+                verbose_println(&format!(
+                    "{}PUT {} ALREADY_EXISTS",
+                    ip_str,
+                    arid.ur_string()
+                ));
+            }
             return Err("ARID already exists".to_string());
         }
 
@@ -89,30 +106,89 @@ impl ServerState {
         };
 
         let expires_at = Instant::now() + ttl;
-        let envelope_ur = envelope.ur_string();
+        let envelope_cbor = envelope.to_cbor_data();
+
+        if self.config.verbose {
+            let ip_str = client_ip
+                .map(|ip| format!("{}: ", ip))
+                .unwrap_or_else(|| "unknown: ".to_string());
+            verbose_println(&format!(
+                "{}PUT {} (TTL {}s) OK",
+                ip_str,
+                arid.ur_string(),
+                ttl.as_secs()
+            ));
+        }
+
         storage.insert(
             arid,
-            StorageEntry { envelope_ur, expires_at: Some(expires_at) },
+            StorageEntry { envelope_cbor, expires_at: Some(expires_at) },
         );
 
         Ok(())
     }
 
-    fn get(&self, arid: &ARID) -> Option<Envelope> {
+    fn get(
+        &self,
+        arid: &ARID,
+        client_ip: Option<SocketAddr>,
+    ) -> Option<Envelope> {
+        use crate::logging::verbose_println;
+
         let mut storage = self.storage.write().unwrap();
 
         if let Some(entry) = storage.get(arid) {
             // Check if expired
             if let Some(expires_at) = entry.expires_at {
                 if Instant::now() >= expires_at {
+                    if self.config.verbose {
+                        let ip_str = client_ip
+                            .map(|ip| format!("{}: ", ip))
+                            .unwrap_or_else(|| "unknown: ".to_string());
+                        verbose_println(&format!(
+                            "{}GET {} EXPIRED",
+                            ip_str,
+                            arid.ur_string()
+                        ));
+                    }
                     storage.remove(arid);
                     return None;
                 }
             }
 
-            // Parse UR string back to Envelope
-            Envelope::from_ur_string(&entry.envelope_ur).ok()
+            // Parse CBOR bytes back to Envelope
+            let envelope =
+                Envelope::try_from_cbor_data(entry.envelope_cbor.clone()).ok();
+            if self.config.verbose {
+                let ip_str = client_ip
+                    .map(|ip| format!("{}: ", ip))
+                    .unwrap_or_else(|| "unknown: ".to_string());
+                if envelope.is_some() {
+                    verbose_println(&format!(
+                        "{}GET {} OK",
+                        ip_str,
+                        arid.ur_string()
+                    ));
+                } else {
+                    verbose_println(&format!(
+                        "{}GET {} PARSE_ERROR",
+                        ip_str,
+                        arid.ur_string()
+                    ));
+                }
+            }
+            envelope
         } else {
+            if self.config.verbose {
+                let ip_str = client_ip
+                    .map(|ip| format!("{}: ", ip))
+                    .unwrap_or_else(|| "unknown: ".to_string());
+                verbose_println(&format!(
+                    "{}GET {} NOT_FOUND",
+                    ip_str,
+                    arid.ur_string()
+                ));
+            }
             None
         }
     }
@@ -144,7 +220,11 @@ impl Server {
         let listener = TcpListener::bind(&addr).await?;
         println!("✓ Hubert server listening on {}", addr);
 
-        axum::serve(listener, app).await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -162,6 +242,7 @@ impl Server {
 #[axum::debug_handler]
 async fn handle_put(
     State(state): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     body: Bytes,
 ) -> Result<impl IntoResponse, ServerError> {
     // Register tags for UR parsing
@@ -198,7 +279,7 @@ async fn handle_put(
 
     // Store the envelope
     state
-        .put(arid, envelope, ttl)
+        .put(arid, envelope, ttl, Some(addr))
         .map_err(ServerError::Conflict)?;
 
     Ok((StatusCode::OK, "OK"))
@@ -210,6 +291,7 @@ async fn handle_put(
 /// Line 1: ur:arid
 async fn handle_get(
     State(state): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     body: Bytes,
 ) -> Result<impl IntoResponse, ServerError> {
     // Register tags for UR parsing
@@ -228,7 +310,7 @@ async fn handle_get(
         .map_err(|_| ServerError::BadRequest("Invalid ur:arid".to_string()))?;
 
     // Retrieve the envelope
-    match state.get(&arid) {
+    match state.get(&arid, Some(addr)) {
         Some(envelope) => Ok((StatusCode::OK, envelope.ur_string())),
         None => Err(ServerError::NotFound),
     }

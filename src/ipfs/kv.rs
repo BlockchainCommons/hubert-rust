@@ -39,10 +39,10 @@ use crate::{KvStore, arid_derivation::derive_ipfs_key_name};
 /// let envelope = Envelope::new("Hello, IPFS!");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope, None).await.unwrap();
+/// store.put(&arid, &envelope, None, false).await.unwrap();
 ///
-/// // Get envelope
-/// if let Some(retrieved) = store.get(&arid, None).await.unwrap() {
+/// // Get envelope with verbose logging
+/// if let Some(retrieved) = store.get(&arid, None, true).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
 /// # }
@@ -52,7 +52,6 @@ pub struct IpfsKv {
     key_cache: Arc<RwLock<std::collections::HashMap<String, KeyInfo>>>,
     max_envelope_size: usize,
     resolve_timeout: Duration,
-    resolve_poll_interval: Duration,
     pin_content: bool,
 }
 
@@ -73,7 +72,6 @@ impl IpfsKv {
             key_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
             max_envelope_size: 10 * 1024 * 1024, // 10 MB
             resolve_timeout: Duration::from_secs(30),
-            resolve_poll_interval: Duration::from_millis(500),
             pin_content: true,
         }
     }
@@ -207,8 +205,13 @@ impl IpfsKv {
         &self,
         peer_id: &str,
         timeout: Duration,
+        verbose: bool,
     ) -> Result<Option<String>, GetError> {
+        use crate::logging::verbose_print_dot;
+
         let deadline = Instant::now() + timeout;
+        // Changed to 1000ms for verbose mode polling
+        let poll_interval = Duration::from_millis(1000);
 
         loop {
             match self.client.name_resolve(Some(peer_id), false, false).await {
@@ -239,8 +242,13 @@ impl IpfsKv {
                         return Err(GetError::Timeout);
                     }
 
-                    // Retry after interval
-                    sleep(self.resolve_poll_interval).await;
+                    // Print polling dot if verbose
+                    if verbose {
+                        verbose_print_dot();
+                    }
+
+                    // Retry after interval (now 1000ms)
+                    sleep(poll_interval).await;
                 }
             }
         }
@@ -254,8 +262,9 @@ impl KvStore for IpfsKv {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope, ttl_seconds)
+        self.put_impl(arid, envelope, ttl_seconds, verbose)
             .await
             .map_err(|e| {
                 Box::new(e) as Box<dyn std::error::Error + Send + Sync>
@@ -266,11 +275,14 @@ impl KvStore for IpfsKv {
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
     {
-        self.get_impl(arid, timeout_seconds).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+        self.get_impl(arid, timeout_seconds, verbose)
+            .await
+            .map_err(|e| {
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn exists(
@@ -290,7 +302,14 @@ impl IpfsKv {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<String, PutError> {
+        use crate::logging::{verbose_newline, verbose_println};
+
+        if verbose {
+            verbose_println("Starting IPFS put operation");
+        }
+
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
 
@@ -299,22 +318,47 @@ impl IpfsKv {
             return Err(PutError::EnvelopeTooLarge { size: bytes.len() });
         }
 
+        if verbose {
+            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+        }
+
         // Get or create IPNS key
+        if verbose {
+            verbose_println("Getting or creating IPNS key");
+        }
         let key_info = self.get_or_create_key(arid).await?;
 
         let key_name = derive_ipfs_key_name(arid);
 
         // Add to IPFS
+        if verbose {
+            verbose_println("Adding content to IPFS");
+        }
         let cid = add_bytes(&self.client, bytes).await?;
+
+        if verbose {
+            verbose_println(&format!("Content CID: {}", cid));
+        }
 
         // Pin if requested
         if self.pin_content {
+            if verbose {
+                verbose_println("Pinning content");
+            }
             pin_cid(&self.client, &cid, true).await?;
         }
 
         // Publish to IPNS (write-once)
+        if verbose {
+            verbose_println("Publishing to IPNS (write-once check)");
+        }
         self.publish_once(&key_name, &key_info.peer_id, &cid, ttl_seconds)
             .await?;
+
+        if verbose {
+            verbose_println("IPFS put operation completed");
+            verbose_newline();
+        }
 
         Ok(format!("ipns://{} -> ipfs://{}", key_info.peer_id, cid))
     }
@@ -324,37 +368,76 @@ impl IpfsKv {
         &self,
         arid: &ARID,
         timeout_seconds: Option<u64>,
+        verbose: bool,
     ) -> Result<Option<Envelope>, GetError> {
+        use crate::logging::{verbose_newline, verbose_println};
+
+        if verbose {
+            verbose_println("Starting IPFS get operation");
+        }
+
         let key_name = derive_ipfs_key_name(arid);
 
         // Get key info from cache or daemon
+        if verbose {
+            verbose_println("Looking up IPNS key");
+        }
         let keys = self.client.key_list().await?;
 
         let key = keys.keys.iter().find(|k| k.name == key_name);
         if key.is_none() {
             // Key doesn't exist, so nothing published
+            if verbose {
+                verbose_println("Key not found");
+                verbose_newline();
+            }
             return Ok(None);
         }
 
         let peer_id = &key.unwrap().id;
 
         // Resolve IPNS to CID with specified timeout
+        if verbose {
+            verbose_println("Resolving IPNS name (polling)");
+        }
         let timeout = timeout_seconds
             .map(Duration::from_secs)
             .unwrap_or(self.resolve_timeout);
-        let cid = self.resolve_with_retry_timeout(peer_id, timeout).await?;
+        let cid = self
+            .resolve_with_retry_timeout(peer_id, timeout, verbose)
+            .await?;
+
+        if verbose {
+            verbose_newline();
+        }
 
         if cid.is_none() {
+            if verbose {
+                verbose_println("IPNS name not published");
+                verbose_newline();
+            }
             return Ok(None);
         }
 
         let cid = cid.unwrap();
 
+        if verbose {
+            verbose_println(&format!("Resolved to CID: {}", cid));
+        }
+
         // Cat CID
+        if verbose {
+            verbose_println("Fetching content from IPFS");
+        }
         let bytes = cat_bytes(&self.client, &cid).await?;
 
         // Deserialize envelope
         let envelope = Envelope::try_from_cbor_data(bytes)?;
+
+        if verbose {
+            verbose_println("IPFS get operation completed");
+            verbose_newline();
+        }
 
         Ok(Some(envelope))
     }

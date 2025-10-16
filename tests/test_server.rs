@@ -31,14 +31,14 @@ async fn test_server_put_get_roundtrip() -> Result<()> {
 
     // Put the envelope
     let receipt = client
-        .put(&arid, &envelope, None) // No TTL
+        .put(&arid, &envelope, None, false) // No TTL
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(!receipt.is_empty(), "Receipt should not be empty");
 
     // Get the envelope back
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_some(), "Envelope should be retrieved");
@@ -71,12 +71,12 @@ async fn test_server_write_once() -> Result<()> {
 
     // First put should succeed
     client
-        .put(&arid, &envelope1, None) // No TTL
+        .put(&arid, &envelope1, None, false) // No TTL
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Second put to same ARID should fail
-    let result = client.put(&arid, &envelope2, None).await;
+    let result = client.put(&arid, &envelope2, None, false).await;
     assert!(result.is_err(), "Second put should fail");
 
     Ok(())
@@ -98,7 +98,7 @@ async fn test_server_get_nonexistent() -> Result<()> {
 
     let arid = ARID::new();
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_none(), "Non-existent ARID should return None");
@@ -125,13 +125,13 @@ async fn test_server_ttl() -> Result<()> {
 
     // Put with 1 second TTL
     client
-        .put(&arid, &envelope, Some(1)) // 1 second TTL
+        .put(&arid, &envelope, Some(1), false) // 1 second TTL
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Should be available immediately
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_some(), "Envelope should be available");
@@ -141,7 +141,7 @@ async fn test_server_ttl() -> Result<()> {
 
     // Should be expired
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_none(), "Envelope should be expired");
@@ -158,6 +158,7 @@ async fn test_server_default_ttl() -> Result<()> {
     let config = ServerConfig {
         port: 45683,
         max_ttl: 2, // 2 seconds
+        verbose: false,
     };
     let server = Server::new(config.clone());
 
@@ -172,13 +173,13 @@ async fn test_server_default_ttl() -> Result<()> {
 
     // Put with None (should use max_ttl = 2 seconds)
     client
-        .put(&arid, &envelope, None)
+        .put(&arid, &envelope, None, false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Should be available immediately
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_some(), "Envelope should be available");
@@ -188,7 +189,7 @@ async fn test_server_default_ttl() -> Result<()> {
 
     // Should be expired
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(
@@ -208,6 +209,7 @@ async fn test_server_ttl_clamping() -> Result<()> {
     let config = ServerConfig {
         port: 45684,
         max_ttl: 2, // 2 seconds max
+        verbose: false,
     };
     let server = Server::new(config.clone());
 
@@ -222,13 +224,13 @@ async fn test_server_ttl_clamping() -> Result<()> {
 
     // Put with 10 seconds (should be clamped to 2 seconds)
     client
-        .put(&arid, &envelope, Some(10))
+        .put(&arid, &envelope, Some(10), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Should be available immediately
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(retrieved.is_some(), "Envelope should be available");
@@ -238,7 +240,7 @@ async fn test_server_ttl_clamping() -> Result<()> {
 
     // Should be expired after 2 seconds (not 10)
     let retrieved = client
-        .get(&arid, Some(30))
+        .get(&arid, Some(30), false)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
     assert!(
@@ -256,7 +258,7 @@ async fn test_server_get_timeout() -> Result<()> {
 
     bc_components::register_tags();
 
-    let config = ServerConfig { port: 45685, max_ttl: 86400 };
+    let config = ServerConfig { port: 45685, max_ttl: 86400, verbose: false };
     let server = Server::new(config.clone());
 
     tokio::spawn(async move { server.run().await });
@@ -269,7 +271,7 @@ async fn test_server_get_timeout() -> Result<()> {
 
     // Measure time to timeout (should be ~2 seconds)
     let start = Instant::now();
-    let result = client.get(&arid, Some(2)).await;
+    let result = client.get(&arid, Some(2), false).await;
     let elapsed = start.elapsed();
 
     // Should return None (not found) after timeout

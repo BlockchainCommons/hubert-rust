@@ -64,7 +64,7 @@ async fn mainline_get_timeout() {
 
     // Measure time to timeout (should be ~2 seconds)
     let start = Instant::now();
-    let result = store.get(&arid, Some(2)).await;
+    let result = store.get(&arid, Some(2), false).await;
     let elapsed = start.elapsed();
 
     // Should return None (not found) after timeout
