@@ -58,7 +58,9 @@ impl MemoryKv {
 }
 
 impl Default for MemoryKv {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -89,8 +91,7 @@ impl KvStore for MemoryKv {
             ttl_seconds.map(|ttl| Instant::now() + Duration::from_secs(ttl));
         let envelope_cbor = envelope.to_cbor_data();
 
-        storage
-            .insert(arid.clone(), StorageEntry { envelope_cbor, expires_at });
+        storage.insert(*arid, StorageEntry { envelope_cbor, expires_at });
 
         if verbose {
             let ttl_msg = ttl_seconds
