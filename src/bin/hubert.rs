@@ -3,12 +3,14 @@
 //! A command-line tool for storing and retrieving Gordian Envelopes using
 //! distributed storage backends (BitTorrent Mainline DHT or IPFS).
 
+use std::path::PathBuf;
+
 use anyhow::{Result, anyhow, bail};
 use bc_components::ARID;
 use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use clap::{Parser, Subcommand, ValueEnum};
-use hubert::{KvStore, ipfs::IpfsKv, mainline::MainlineDhtKv};
+use hubert::{KvStore, SqliteKv, ipfs::IpfsKv, mainline::MainlineDhtKv};
 
 /// Hubert: Secure distributed key-value store for Gordian Envelopes
 #[derive(Debug, Parser)]
@@ -78,7 +80,13 @@ enum Commands {
     Check,
 
     /// Start the Hubert HTTP server
-    Server,
+    Server {
+        /// SQLite database file path for persistent storage.
+        /// If a directory is provided, uses 'hubert.sqlite' in that directory.
+        /// If not provided, uses in-memory storage.
+        #[arg(long)]
+        sqlite: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -239,7 +247,7 @@ async fn main() -> Result<()> {
 
     // Validate port/host usage based on storage backend (skip for Server
     // command)
-    if !matches!(cli.command, Commands::Server) {
+    if !matches!(cli.command, Commands::Server { .. }) {
         match cli.storage {
             StorageBackend::Mainline => {
                 if cli.port.is_some() {
@@ -370,7 +378,7 @@ async fn main() -> Result<()> {
             }
         },
 
-        Commands::Server => {
+        Commands::Server { sqlite } => {
             use hubert::server::{Server, ServerConfig};
 
             // Validate that --storage is not used with server command
@@ -386,9 +394,34 @@ async fn main() -> Result<()> {
                 max_ttl: 86400, // 24 hours
                 verbose: cli.verbose,
             };
-            let server = Server::new(config);
-            println!("Starting Hubert server on port {}", port);
-            server.run().await.map_err(|e| anyhow!("{}", e))?;
+
+            // Determine storage backend
+            if let Some(sqlite_path) = sqlite {
+                // Use SQLite storage
+                let path = if PathBuf::from(&sqlite_path).is_dir() {
+                    PathBuf::from(&sqlite_path).join("hubert.sqlite")
+                } else {
+                    PathBuf::from(&sqlite_path)
+                };
+
+                let store =
+                    SqliteKv::new(&path).map_err(|e| anyhow!("{}", e))?;
+                let server = Server::new_sqlite(config, store);
+                println!(
+                    "Starting Hubert server on port {} with SQLite storage: {}",
+                    port,
+                    path.display()
+                );
+                server.run().await.map_err(|e| anyhow!("{}", e))?;
+            } else {
+                // Use in-memory storage
+                let server = Server::new_memory(config);
+                println!(
+                    "Starting Hubert server on port {} with in-memory storage",
+                    port
+                );
+                server.run().await.map_err(|e| anyhow!("{}", e))?;
+            }
         }
     }
 
