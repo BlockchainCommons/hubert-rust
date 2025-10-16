@@ -58,9 +58,7 @@ impl MemoryKv {
 }
 
 impl Default for MemoryKv {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[async_trait::async_trait(?Send)]

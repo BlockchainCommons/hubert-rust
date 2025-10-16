@@ -88,6 +88,7 @@ pub async fn test_multiple_arids(store: &impl KvStore) {
     println!("✓ Multiple ARIDs test passed");
 }
 
+#[allow(dead_code)]
 pub async fn test_size_limit(store: &impl KvStore, max_size: usize) {
     let arid = ARID::new();
     let large = Envelope::new("x".repeat(max_size + 1000).as_str());

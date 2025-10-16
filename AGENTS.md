@@ -872,8 +872,6 @@ Based on existing tests:
 
 ## 3. Hybrid Storage Layer (DHT with IPFS Fallback)
 
-**Status**: Not yet implemented. This section describes the planned architecture.
-
 ### 3.1 Architecture
 
 The Hybrid storage layer combines DHT and IPFS to optimize for both speed and capacity:

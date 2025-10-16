@@ -1,4 +1,5 @@
 mod arid_derivation;
+pub mod hybrid;
 pub mod ipfs;
 mod kv_store;
 pub mod logging;

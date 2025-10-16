@@ -10,7 +10,9 @@ use bc_components::ARID;
 use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use clap::{Parser, Subcommand, ValueEnum};
-use hubert::{KvStore, SqliteKv, ipfs::IpfsKv, mainline::MainlineDhtKv};
+use hubert::{
+    KvStore, SqliteKv, hybrid::HybridKv, ipfs::IpfsKv, mainline::MainlineDhtKv,
+};
 
 /// Hubert: Secure distributed key-value store for Gordian Envelopes
 #[derive(Debug, Parser)]
@@ -24,7 +26,8 @@ struct Cli {
     #[arg(long, global = true)]
     host: Option<String>,
 
-    /// Port (for --storage server, --storage ipfs, or server command)
+    /// Port (for --storage server, --storage ipfs, --storage hybrid, or server
+    /// command)
     #[arg(long, global = true)]
     port: Option<u16>,
 
@@ -42,6 +45,8 @@ enum StorageBackend {
     Mainline,
     /// IPFS (large capacity, up to 10 MB messages)
     Ipfs,
+    /// Hybrid (automatic: DHT for small, IPFS for large)
+    Hybrid,
     /// Hubert HTTP server (centralized coordination)
     Server,
 }
@@ -206,6 +211,36 @@ async fn get_ipfs(
         .map_err(|e| anyhow!("{}", e))
 }
 
+async fn put_hybrid(
+    arid: &ARID,
+    envelope: &Envelope,
+    port: u16,
+    verbose: bool,
+) -> Result<()> {
+    let url = format!("http://127.0.0.1:{}", port);
+    let store = HybridKv::new(&url).await.map_err(|e| anyhow!("{}", e))?;
+    store
+        .put(arid, envelope, None, verbose)
+        .await
+        .map_err(|e| anyhow!("{}", e))?;
+    println!("✓ Stored envelope at ARID");
+    Ok(())
+}
+
+async fn get_hybrid(
+    arid: &ARID,
+    timeout: u64,
+    port: u16,
+    verbose: bool,
+) -> Result<Option<Envelope>> {
+    let url = format!("http://127.0.0.1:{}", port);
+    let store = HybridKv::new(&url).await.map_err(|e| anyhow!("{}", e))?;
+    store
+        .get(arid, Some(timeout), verbose)
+        .await
+        .map_err(|e| anyhow!("{}", e))
+}
+
 async fn put_server(
     host: &str,
     port: u16,
@@ -273,6 +308,13 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            StorageBackend::Hybrid => {
+                if cli.host.is_some() {
+                    bail!(
+                        "--host option is not supported for --storage hybrid (always uses 127.0.0.1)"
+                    );
+                }
+            }
             StorageBackend::Server => {
                 // host and port are allowed
             }
@@ -309,6 +351,15 @@ async fn main() -> Result<()> {
                     let port = cli.port.unwrap_or(5001);
                     put_ipfs(&arid, &envelope, port, cli.verbose).await?
                 }
+                StorageBackend::Hybrid => {
+                    if ttl.is_some() {
+                        bail!(
+                            "--ttl option is only supported for --storage server"
+                        );
+                    }
+                    let port = cli.port.unwrap_or(5001);
+                    put_hybrid(&arid, &envelope, port, cli.verbose).await?
+                }
                 StorageBackend::Server => {
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                     let port = cli.port.unwrap_or(45678);
@@ -328,6 +379,10 @@ async fn main() -> Result<()> {
                 StorageBackend::Ipfs => {
                     let port = cli.port.unwrap_or(5001);
                     get_ipfs(&arid, timeout, port, cli.verbose).await?
+                }
+                StorageBackend::Hybrid => {
+                    let port = cli.port.unwrap_or(5001);
+                    get_hybrid(&arid, timeout, port, cli.verbose).await?
                 }
                 StorageBackend::Server => {
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
@@ -351,6 +406,13 @@ async fn main() -> Result<()> {
             StorageBackend::Ipfs => {
                 let port = cli.port.unwrap_or(5001);
                 check_ipfs(port).await?
+            }
+            StorageBackend::Hybrid => {
+                // Check both DHT and IPFS
+                check_mainline().await?;
+                let port = cli.port.unwrap_or(5001);
+                check_ipfs(port).await?;
+                println!("✓ Hybrid storage is available (DHT + IPFS)");
             }
             StorageBackend::Server => {
                 // Check if server is reachable

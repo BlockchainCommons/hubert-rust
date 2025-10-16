@@ -237,9 +237,7 @@ pub struct Server {
 impl Server {
     /// Create a new server with the given configuration.
     /// Uses in-memory storage by default.
-    pub fn new(config: ServerConfig) -> Self {
-        Self::new_memory(config)
-    }
+    pub fn new(config: ServerConfig) -> Self { Self::new_memory(config) }
 
     /// Create a new server with in-memory storage.
     pub fn new_memory(config: ServerConfig) -> Self {
@@ -276,9 +274,7 @@ impl Server {
     }
 
     /// Get the port the server is configured to listen on.
-    pub fn port(&self) -> u16 {
-        self.config.port
-    }
+    pub fn port(&self) -> u16 { self.config.port }
 }
 
 /// Handle PUT requests.
