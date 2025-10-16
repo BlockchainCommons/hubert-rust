@@ -45,10 +45,10 @@ use crate::{KvStore, arid_derivation::derive_mainline_key};
 /// let envelope = Envelope::new("Small message");
 ///
 /// // Put envelope (write-once)
-/// store.put(&arid, &envelope).await.unwrap();
+/// store.put(&arid, &envelope, None).await.unwrap();
 ///
 /// // Get envelope
-/// if let Some(retrieved) = store.get(&arid).await.unwrap() {
+/// if let Some(retrieved) = store.get(&arid, None).await.unwrap() {
 ///     assert_eq!(retrieved, envelope);
 /// }
 /// # }

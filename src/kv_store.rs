@@ -52,7 +52,7 @@ use bc_envelope::Envelope;
 ///     tokio::runtime::Runtime::new().unwrap().block_on(async {
 ///         let arid = ARID::new();
 ///         let env = Envelope::new("data");
-///         store1.put(&arid, &env).await
+///         store1.put(&arid, &env, None).await
 ///     })
 /// });
 /// # }
@@ -70,7 +70,7 @@ use bc_envelope::Envelope;
 ///
 /// // ERROR: Cannot spawn !Send future across threads
 /// tokio::spawn(async move {
-///     store.put(&arid, &env).await
+///     store.put(&arid, &env, None).await
 /// });
 /// # }
 /// ```
