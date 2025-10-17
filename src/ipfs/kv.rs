@@ -72,7 +72,7 @@ impl IpfsKv {
             key_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
             max_envelope_size: 10 * 1024 * 1024, // 10 MB
             resolve_timeout: Duration::from_secs(30),
-            pin_content: true,
+            pin_content: false,
         }
     }
 
@@ -88,7 +88,7 @@ impl IpfsKv {
         self
     }
 
-    /// Set whether to pin content (default: true).
+    /// Set whether to pin content (default: false).
     pub fn with_pin_content(mut self, pin: bool) -> Self {
         self.pin_content = pin;
         self

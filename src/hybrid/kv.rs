@@ -86,6 +86,14 @@ impl HybridKv {
         self
     }
 
+    /// Set whether to pin content in IPFS (default: false).
+    ///
+    /// Only affects envelopes stored in IPFS (when larger than DHT limit).
+    pub fn with_pin_content(mut self, pin: bool) -> Self {
+        self.ipfs = self.ipfs.with_pin_content(pin);
+        self
+    }
+
     /// Check if an envelope fits in the DHT.
     fn fits_in_dht(&self, envelope: &Envelope) -> bool {
         let serialized = envelope.tagged_cbor().to_cbor_data();

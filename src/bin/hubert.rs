@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow, bail};
 use bc_components::ARID;
 use bc_envelope::Envelope;
+use bc_rand::random_data;
 use bc_ur::prelude::*;
 use clap::{Parser, Subcommand, ValueEnum};
 use hubert::{
@@ -72,6 +73,10 @@ enum Commands {
         /// Time-to-live in seconds (only for --storage server)
         #[arg(long)]
         ttl: Option<u64>,
+
+        /// Pin content in IPFS (only for --storage ipfs or --storage hybrid)
+        #[arg(long)]
+        pin: bool,
     },
 
     /// Retrieve an envelope by ARID
@@ -102,6 +107,12 @@ enum Commands {
 enum GenerateType {
     /// Generate a new ARID
     Arid,
+    /// Generate a test envelope with random data
+    Envelope {
+        /// Number of random bytes to include in the envelope's subject
+        #[arg(value_name = "SIZE")]
+        size: usize,
+    },
 }
 
 fn parse_arid(s: &str) -> Result<ARID> {
@@ -115,6 +126,12 @@ fn parse_envelope(s: &str) -> Result<Envelope> {
     } else {
         bail!("Invalid envelope format. Expected ur:envelope")
     }
+}
+
+fn generate_random_envelope(size: usize) -> Envelope {
+    let random_bytes = random_data(size);
+    let byte_string = ByteString::new(random_bytes);
+    Envelope::new(byte_string)
 }
 
 async fn check_mainline() -> Result<()> {
@@ -173,10 +190,11 @@ async fn put_ipfs(
     arid: &ARID,
     envelope: &Envelope,
     port: u16,
+    pin: bool,
     verbose: bool,
 ) -> Result<()> {
     let url = format!("http://127.0.0.1:{}", port);
-    let store = IpfsKv::new(&url);
+    let store = IpfsKv::new(&url).with_pin_content(pin);
     store
         .put(arid, envelope, None, verbose) // No TTL (use IPFS default of 24h)
         .await
@@ -215,10 +233,14 @@ async fn put_hybrid(
     arid: &ARID,
     envelope: &Envelope,
     port: u16,
+    pin: bool,
     verbose: bool,
 ) -> Result<()> {
     let url = format!("http://127.0.0.1:{}", port);
-    let store = HybridKv::new(&url).await.map_err(|e| anyhow!("{}", e))?;
+    let store = HybridKv::new(&url)
+        .await
+        .map_err(|e| anyhow!("{}", e))?
+        .with_pin_content(pin);
     store
         .put(arid, envelope, None, verbose)
         .await
@@ -327,9 +349,13 @@ async fn main() -> Result<()> {
                 let arid = ARID::new();
                 println!("{}", arid.ur_string());
             }
+            GenerateType::Envelope { size } => {
+                let envelope = generate_random_envelope(size);
+                println!("{}", envelope.ur_string());
+            }
         },
 
-        Commands::Put { arid, envelope, ttl } => {
+        Commands::Put { arid, envelope, ttl, pin } => {
             let arid = parse_arid(&arid)?;
             let envelope = parse_envelope(&envelope)?;
 
@@ -338,6 +364,11 @@ async fn main() -> Result<()> {
                     if ttl.is_some() {
                         bail!(
                             "--ttl option is only supported for --storage server"
+                        );
+                    }
+                    if pin {
+                        bail!(
+                            "--pin option is only supported for --storage ipfs or --storage hybrid"
                         );
                     }
                     put_mainline(&arid, &envelope, cli.verbose).await?
@@ -349,7 +380,7 @@ async fn main() -> Result<()> {
                         );
                     }
                     let port = cli.port.unwrap_or(5001);
-                    put_ipfs(&arid, &envelope, port, cli.verbose).await?
+                    put_ipfs(&arid, &envelope, port, pin, cli.verbose).await?
                 }
                 StorageBackend::Hybrid => {
                     if ttl.is_some() {
@@ -358,9 +389,14 @@ async fn main() -> Result<()> {
                         );
                     }
                     let port = cli.port.unwrap_or(5001);
-                    put_hybrid(&arid, &envelope, port, cli.verbose).await?
+                    put_hybrid(&arid, &envelope, port, pin, cli.verbose).await?
                 }
                 StorageBackend::Server => {
+                    if pin {
+                        bail!(
+                            "--pin option is only supported for --storage ipfs or --storage hybrid"
+                        );
+                    }
                     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                     let port = cli.port.unwrap_or(45678);
                     put_server(host, port, &arid, &envelope, ttl, cli.verbose)
