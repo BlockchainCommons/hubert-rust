@@ -71,7 +71,9 @@ enum Commands {
         #[arg(value_name = "ENVELOPE")]
         envelope: String,
 
-        /// Time-to-live in seconds (only for --storage server)
+        /// Time-to-live in seconds (for --storage server or --storage ipfs/hybrid).
+        /// Server: controls data retention (default: 24 hours).
+        /// IPFS: controls IPNS record lifetime (default: 24 hours).
         #[arg(long)]
         ttl: Option<u64>,
 
@@ -198,13 +200,23 @@ async fn put_ipfs(
 ) -> Result<()> {
     let url = format!("http://127.0.0.1:{}", port);
     let store = IpfsKv::new(&url).with_pin_content(pin);
-    store
+    let result = store
         .put(arid, envelope, None, verbose) // No TTL (use IPFS default of 24h)
         .await
         .map_err(|e| anyhow!("{}", e))?;
+
     if verbose {
         verbose_println("✓ Stored envelope at ARID");
     }
+
+    // Extract and print CID if pinning was requested
+    if pin {
+        // Result format is "ipns://{peer_id} -> ipfs://{cid}"
+        if let Some(cid_part) = result.split("ipfs://").nth(1) {
+            println!("CID: {}", cid_part);
+        }
+    }
+
     Ok(())
 }
 
@@ -246,13 +258,22 @@ async fn put_hybrid(
         .await
         .map_err(|e| anyhow!("{}", e))?
         .with_pin_content(pin);
-    store
+    let result = store
         .put(arid, envelope, None, verbose)
         .await
         .map_err(|e| anyhow!("{}", e))?;
+
     if verbose {
         verbose_println("✓ Stored envelope at ARID");
     }
+
+    // Extract and print CID if pinning was requested and IPFS was used
+    if pin && result.contains("ipfs://") {
+        if let Some(cid_part) = result.split("ipfs://").nth(1) {
+            println!("CID: {}", cid_part);
+        }
+    }
+
     Ok(())
 }
 
@@ -441,7 +462,7 @@ async fn main() -> Result<()> {
                     println!("{}", env.ur_string());
                 }
                 None => {
-                    bail!("Envelope not found within {} seconds", timeout);
+                    bail!("Value not found within {} seconds", timeout);
                 }
             }
         }

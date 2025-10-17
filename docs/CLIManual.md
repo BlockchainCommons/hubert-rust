@@ -37,9 +37,6 @@
     - [Server TTL](#server-ttl)
   - [Bidirectional Communication Pattern](#bidirectional-communication-pattern)
     - [Request-Response Flow](#request-response-flow)
-  - [Integration with GSTP](#integration-with-gstp)
-  - [Troubleshooting](#troubleshooting)
-  - [Command Reference](#command-reference)
 
 ## Introduction
 
@@ -494,34 +491,46 @@ Control how long to wait for retrieval operations:
 # Wait up to 60 seconds (default is 30)
 hubert get --timeout 60 $ARID
 
-│ ur:envelope/tpsojkihjkjyjljtihjkkshsjpjeihcxfefgfpam
+│ ur:envelope/tpsojtguihjpkoihjpcxjnihjkjkhsioihjpryisve
 ```
 
 If the timeout expires:
 
 ```
+NONEXISTENT_ARID=$(hubert generate arid)
 hubert get --timeout 5 $NONEXISTENT_ARID
 
-│ Error: Timeout: Failed to retrieve envelope after 5 seconds
+│ Error: Value not found within 5 seconds
 ```
 
 ### IPFS Pinning
 
-By default, IPFS content is not pinned and may be garbage collected. Use `--pin` to ensure persistence (as long as your IPFS node is running):
+By default, IPFS content is not pinned and may be garbage collected. Use `--pin` to ensure persistence (as long as your IPFS node is running).
+The command's output shows the pinned CID:
 
 ```
+ARID=$(hubert generate arid)
+ENVELOPE=$(envelope subject type string "Pinned IPFS message")
 hubert put --storage ipfs --pin $ARID $ENVELOPE
 
-│ ✓ Stored and pinned envelope at IPFS
-│ CID: QmX7Zx3YyP8mN9oQ5rT6vW2pL4kJ8hF3gR1sD9eT5mC7nA
+│ CID: QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR
 ```
 
 Pinned content remains available until explicitly unpinned:
 
 ```
-ipfs pin ls QmX7Zx3YyP8mN9oQ5rT6vW2pL4kJ8hF3gR1sD9eT5mC7nA
+ipfs pin ls QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR
 
-│ QmX7Zx3YyP8mN9oQ5rT6vW2pL4kJ8hF3gR1sD9eT5mC7nA recursive
+│ QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR recursive
+```
+
+The returned CID can be used to unpin later if desired.
+
+```
+ipfs pin rm QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR
+ipfs pin ls QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR
+
+│ Error: path 'QmZWpMdDR1Y1zWCziJByWFs6rRFZ8zXRCxuh9dbhg5u9BR' is not pinned
 ```
 
 ### Server TTL
@@ -530,16 +539,16 @@ When using the server backend, specify how long data should be retained:
 
 ```
 # Store with 1 hour TTL
+ARID=$(hubert generate arid)
+ENVELOPE=$(envelope subject type string "Temporary message")
 hubert put --storage server --ttl 3600 $ARID $ENVELOPE
-
-│ ✓ Stored envelope with 3600s TTL
 ```
 
 ```
 # Store with 24 hour TTL
+ARID=$(hubert generate arid)
+ENVELOPE=$(envelope subject type string "One day message")
 hubert put --storage server --ttl 86400 $ARID $ENVELOPE
-
-│ ✓ Stored envelope with 86400s TTL
 ```
 
 After the TTL expires, the server automatically removes the data.
@@ -562,15 +571,25 @@ RESPONSE_ARID=$(hubert generate arid)
 # Alice creates an envelope with the document and response ARID
 # (In practice, this would be encrypted with GSTP to Bob's public key)
 REQUEST_ENVELOPE=$(envelope subject type string "Please sign: document.pdf" | \
-  envelope assertion add pred-obj string "responseArid" string "$RESPONSE_ARID")
+  envelope assertion add pred-obj string "responseArid" arid "$RESPONSE_ARID")
+
+echo $REQUEST_ARID
+echo $RESPONSE_ARID
+echo $REQUEST_ENVELOPE
+envelope format $REQUEST_ENVELOPE
+
+│ ur:arid/hdcxrdbybkbbkbchcfknykdispmkghiacahgecishyetwnvestpsttwepkhtzeknttveswvozsgu
+│ ur:arid/hdcxfzditpftaeonvosnbslteykgpkptfrmeguntbdimoytlfmmncypeckvdylpyhfesmyethdbd
+│ ur:envelope/lftpsokscfgdjzihhsjkihcxjkiniojtftcxiejliakpjnihjtjydmjoieiyoytpsojzjpihjkjojljtjkihfpjpinietpsotansgshdcxfzditpftaeonvosnbslteykgpkptfrmeguntbdimoytlfmmncypeckvdylpyhfesbzcaqdbk
+│ "Please sign: document.pdf" [
+│     "responseArid": ARID(4027d83a)
+│ ]
 ```
 
 **Step 2: Alice publishes the request**
 
 ```
 hubert put $REQUEST_ARID $REQUEST_ENVELOPE
-
-│ ✓ Stored envelope at ur:arid/hdcx...
 ```
 
 **Step 3: Alice shares REQUEST_ARID with Bob**
@@ -581,23 +600,27 @@ Alice sends the REQUEST_ARID to Bob via a secure channel (Signal, QR code, encry
 
 ```
 # Bob receives REQUEST_ARID from Alice via secure channel
-REQUEST_ARID="ur:arid/hdcx..."
+RECEIVED_REQUEST_ARID=$REQUEST_ARID
 
 # Bob retrieves the request
-hubert get $REQUEST_ARID
+RECEIVED_REQUEST_ENVELOPE=$(hubert get $RECEIVED_REQUEST_ARID)
+envelope format $RECEIVED_REQUEST_ENVELOPE
 
-│ ur:envelope/lftpsoihfpjzinjljljzinjpjljtjkjyihjzjpjtjnihjpjnisinjnjtihihihih...
+│ "Please sign: document.pdf" [
+│     "responseArid": ARID(4027d83a)
+│ ]
 ```
 
 ```
-# Bob extracts the response ARID from the request
-RESPONSE_ARID=$(hubert get $REQUEST_ARID | \
-  envelope assertion find pred string "responseArid" | \
-  envelope extract string)
+RECEIVED_RESPONSE_ARID=$( \
+  envelope assertion find predicate string "responseArid" $RECEIVED_REQUEST_ENVELOPE | \
+  envelope extract object | \
+  envelope extract arid \
+)
 
-echo $RESPONSE_ARID
+echo $RECEIVED_RESPONSE_ARID
 
-│ ur:arid/hdcxbwmwcwfdkecauerfvsdirpwpfhfgtalfmulesnstvlrpoyfzuyenamdpmdcfutdl
+│ ur:arid/hdcxfzditpftaeonvosnbslteykgpkptfrmeguntbdimoytlfmmncypeckvdylpyhfesmyethdbd
 ```
 
 **Step 5: Bob creates and publishes the response**
@@ -605,291 +628,30 @@ echo $RESPONSE_ARID
 ```
 # Bob creates his response (signature, etc.)
 RESPONSE_ENVELOPE=$(envelope subject type string "Signed: document.pdf.sig")
+envelope format $RESPONSE_ENVELOPE
 
+│ "Signed: document.pdf.sig"
+```
+
+```
 # Bob publishes at the RESPONSE_ARID that Alice specified
-hubert put $RESPONSE_ARID $RESPONSE_ENVELOPE
-
-│ ✓ Stored envelope at ur:arid/hdcxbwmw...
+hubert put $RECEIVED_RESPONSE_ARID $RESPONSE_ENVELOPE
 ```
 
 **Step 6: Alice retrieves the response**
 
 ```
 # Alice already knows the RESPONSE_ARID (she generated it)
-hubert get $RESPONSE_ARID
-
-│ ur:envelope/tpsojkisinjkinishsjtjlihjzinidhlroiehl
-```
-
-```
-# Alice extracts Bob's signature
-hubert get $RESPONSE_ARID | envelope extract string
+RECEIVED_RESPONSE_ENVELOPE=$(hubert get $RESPONSE_ARID)
+envelope extract string $RECEIVED_RESPONSE_ENVELOPE
 
 │ Signed: document.pdf.sig
 ```
 
 **Key points**:
-- ARIDs never published to storage - shared only via secure channels
+- ARIDs shared only via secure channels
 - No direct connection needed between Alice and Bob
 - Parties don't need to be online simultaneously
-- Storage network sees only encrypted envelopes (with GSTP)
+- Storage network sees only encrypted envelopes
 - Write-once semantics prevent tampering
-
-## Integration with GSTP
-
-Hubert is designed to work with GSTP (Gordian Sealed Transaction Protocol) for end-to-end encryption. GSTP envelopes encrypt the subject and seal recipient assertions, providing complete opacity to storage networks.
-
-**Example: Encrypted communication**
-
-```
-# Alice creates a GSTP envelope encrypted to Bob's public key
-# (Using the 'envelope' CLI with GSTP support)
-ALICE_REQUEST=$(envelope subject type string "Secret message" | \
-  envelope encrypt recipient --recipient-pubkey $BOB_PUBKEY | \
-  envelope sign --signer $ALICE_PRIVKEY)
-
-# Alice stores the encrypted envelope
-REQUEST_ARID=$(hubert generate arid)
-hubert put $REQUEST_ARID $ALICE_REQUEST
-
-│ ✓ Stored envelope at ur:arid/hdcx...
-```
-
-**What the storage network sees**: Only the encrypted GSTP envelope - subject is encrypted, recipient assertions are sealed. No plaintext, no metadata, no indication of content.
-
-**What Bob sees**: After retrieving and decrypting with his private key, Bob sees the original message, verifies Alice's signature, and can extract the response ARID from the decrypted content.
-
-This combination of Hubert's write-once storage and GSTP's encryption provides:
-- **Network opacity**: Storage nodes see only ciphertext
-- **Sender authentication**: Cryptographic signatures prove origin
-- **Receiver privacy**: Only intended recipients can decrypt
-- **Message integrity**: Write-once prevents tampering
-- **Capability-based access**: ARID holder can read; ARID creator can write
-
-## Troubleshooting
-
-**Problem**: DHT operations are slow or failing
-
-```
-hubert --verbose put $ARID $ENVELOPE
-
-│ [2025-10-17T14:45:23Z] Bootstrapping into DHT network...
-│ [2025-10-17T14:45:33Z] Error: Failed to bootstrap: No peers available
-```
-
-**Solution**: DHT requires network connectivity and can take 10-30 seconds to bootstrap. Check your internet connection and firewall settings. UDP port 6881 must not be blocked.
-
----
-
-**Problem**: IPFS operations failing
-
-```
-hubert check --storage ipfs
-
-│ Error: IPFS daemon not available at http://127.0.0.1:5001
-```
-
-**Solution**: Start the IPFS daemon:
-
-```
-ipfs daemon
-
-│ Initializing daemon...
-│ API server listening on /ip4/127.0.0.1/tcp/5001
-```
-
----
-
-**Problem**: Write-once violation error
-
-```
-hubert put $ARID $ENVELOPE
-
-│ Error: Write-once violation: ARID already exists
-```
-
-**Solution**: This is expected behavior - each ARID can only be written once. Generate a new ARID for new data:
-
-```
-NEW_ARID=$(hubert generate arid)
-hubert put $NEW_ARID $ENVELOPE
-```
-
----
-
-**Problem**: Retrieval timeout
-
-```
-hubert get $ARID
-
-│ Error: Timeout: Failed to retrieve envelope after 30 seconds
-```
-
-**Solutions**:
-- Increase timeout: `hubert get --timeout 60 $ARID`
-- For DHT: Data may not be sufficiently propagated yet (wait and retry)
-- For IPFS: Content may not be pinned or provider offline
-- Verify ARID was actually written: Check your put operation succeeded
-
----
-
-**Problem**: Invalid ARID or envelope format
-
-```
-hubert put "not-a-valid-arid" $ENVELOPE
-
-│ Error: Invalid ARID format: expected ur:arid/...
-```
-
-**Solution**: ARIDs and envelopes must be in UR format:
-- ARIDs: `ur:arid/hdcx...`
-- Envelopes: `ur:envelope/tpsoi...`
-
-Generate valid identifiers:
-
-```
-ARID=$(hubert generate arid)
-ENVELOPE=$(envelope subject type string "data")
-```
-
----
-
-**Problem**: Message too large for DHT
-
-```
-hubert put $ARID $LARGE_ENVELOPE
-
-│ Error: Envelope too large for DHT storage (1523 bytes, max 1000 bytes)
-```
-
-**Solution**: Use IPFS or Hybrid storage for large messages:
-
-```
-hubert put --storage ipfs $ARID $LARGE_ENVELOPE
-# or
-hubert put --storage hybrid $ARID $LARGE_ENVELOPE
-```
-
-## Command Reference
-
-**Global Options** (apply to all commands):
-
-```
--s, --storage <STORAGE>    Storage backend: mainline, ipfs, hybrid, server [default: mainline]
-    --host <HOST>          Server/IPFS host
-    --port <PORT>          Port for server/IPFS/hybrid
--v, --verbose              Enable verbose logging
--h, --help                 Print help
--V, --version              Print version
-```
-
----
-
-**`hubert generate arid`** - Generate a new ARID
-
-```
-hubert generate arid
-
-│ ur:arid/hdcxuestvsdemusrdlkngwtosweortdwbasrdrfxhssgfmvlrflthdplatjydmmwahgdwlflguqz
-```
-
-Output: A new ARID in UR format
-
----
-
-**`hubert generate envelope`** - Generate a test envelope
-
-```
-hubert generate envelope
-
-│ ur:envelope/tpsoiyfdihjzjzjldmksbaoede
-```
-
-Output: A test envelope with random data in UR format
-
----
-
-**`hubert put`** - Store an envelope at an ARID
-
-```
-hubert put [OPTIONS] <ARID> <ENVELOPE>
-```
-
-Arguments:
-- `<ARID>`: ARID key in `ur:arid` format
-- `<ENVELOPE>`: Envelope value in `ur:envelope` format
-
-Options:
-- `--ttl <TTL>`: Time-to-live in seconds (server backend only)
-- `--pin`: Pin content in IPFS (ipfs/hybrid backend only)
-
-Example:
-
-```
-hubert put ur:arid/hdcx... ur:envelope/tpsoi...
-
-│ ✓ Stored envelope at ur:arid/hdcx...
-```
-
----
-
-**`hubert get`** - Retrieve an envelope by ARID
-
-```
-hubert get [OPTIONS] <ARID>
-```
-
-Arguments:
-- `<ARID>`: ARID key in `ur:arid` format
-
-Options:
-- `-t, --timeout <TIMEOUT>`: Maximum time to wait in seconds [default: 30]
-
-Example:
-
-```
-hubert get ur:arid/hdcx...
-
-│ ur:envelope/tpsoi...
-```
-
----
-
-**`hubert check`** - Check if storage backend is available
-
-```
-hubert check [OPTIONS]
-```
-
-Options: (uses global --storage, --host, --port options)
-
-Example:
-
-```
-hubert check --storage ipfs
-
-│ ✓ IPFS is available at http://127.0.0.1:5001
-```
-
----
-
-**`hubert server`** - Start the Hubert HTTP server
-
-```
-hubert server [OPTIONS]
-```
-
-Options:
-- `--port <PORT>`: Port to listen on [default: 8080]
-
-Example:
-
-```
-hubert server --port 8080
-
-│ 🚀 Hubert server starting...
-│ 📦 Storage: SQLite database at hubert.sqlite
-│ 🌐 Listening on http://0.0.0.0:8080
-```
-
-**Note**: This command blocks and runs the server. Use Ctrl+C to stop.
+- Encryption and authentication using GSTP ensures confidentiality and integrity
