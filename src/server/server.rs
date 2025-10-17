@@ -11,7 +11,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use bc_components::ARID;
 use bc_envelope::Envelope;
@@ -237,7 +237,9 @@ pub struct Server {
 impl Server {
     /// Create a new server with the given configuration.
     /// Uses in-memory storage by default.
-    pub fn new(config: ServerConfig) -> Self { Self::new_memory(config) }
+    pub fn new(config: ServerConfig) -> Self {
+        Self::new_memory(config)
+    }
 
     /// Create a new server with in-memory storage.
     pub fn new_memory(config: ServerConfig) -> Self {
@@ -256,6 +258,7 @@ impl Server {
         self,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let app = Router::new()
+            .route("/health", get(handle_health))
             .route("/put", post(handle_put))
             .route("/get", post(handle_get))
             .with_state(self.state);
@@ -274,7 +277,22 @@ impl Server {
     }
 
     /// Get the port the server is configured to listen on.
-    pub fn port(&self) -> u16 { self.config.port }
+    pub fn port(&self) -> u16 {
+        self.config.port
+    }
+}
+
+/// Handle health check requests.
+///
+/// Returns JSON with server identification and version.
+async fn handle_health() -> impl IntoResponse {
+    let version = env!("CARGO_PKG_VERSION");
+    let response = serde_json::json!({
+        "server": "hubert",
+        "version": version,
+        "status": "ok"
+    });
+    (StatusCode::OK, serde_json::to_string(&response).unwrap())
 }
 
 /// Handle PUT requests.

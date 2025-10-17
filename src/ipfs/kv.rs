@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use bc_components::ARID;
 use bc_envelope::Envelope;
+use bc_ur::UREncodable;
 use dcbor::CBOREncodable;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
 use ipfs_api_prelude::request::KeyType;
@@ -163,12 +164,11 @@ impl IpfsKv {
         peer_id: &str,
         cid: &str,
         ttl_seconds: Option<u64>,
+        arid: &ARID,
     ) -> Result<(), PutError> {
         // Check if already published
         if self.is_published(peer_id).await? {
-            return Err(PutError::AlreadyExists {
-                ipns_name: peer_id.to_string(),
-            });
+            return Err(PutError::AlreadyExists { arid: arid.ur_string() });
         }
 
         // Convert TTL seconds to lifetime string for IPNS
@@ -304,7 +304,7 @@ impl IpfsKv {
         ttl_seconds: Option<u64>,
         verbose: bool,
     ) -> Result<String, PutError> {
-        use crate::logging::{verbose_newline, verbose_println};
+        use crate::logging::verbose_println;
 
         if verbose {
             verbose_println("Starting IPFS put operation");
@@ -352,12 +352,17 @@ impl IpfsKv {
         if verbose {
             verbose_println("Publishing to IPNS (write-once check)");
         }
-        self.publish_once(&key_name, &key_info.peer_id, &cid, ttl_seconds)
-            .await?;
+        self.publish_once(
+            &key_name,
+            &key_info.peer_id,
+            &cid,
+            ttl_seconds,
+            arid,
+        )
+        .await?;
 
         if verbose {
             verbose_println("IPFS put operation completed");
-            verbose_newline();
         }
 
         Ok(format!("ipns://{} -> ipfs://{}", key_info.peer_id, cid))
@@ -389,7 +394,6 @@ impl IpfsKv {
             // Key doesn't exist, so nothing published
             if verbose {
                 verbose_println("Key not found");
-                verbose_newline();
             }
             return Ok(None);
         }
@@ -414,7 +418,6 @@ impl IpfsKv {
         if cid.is_none() {
             if verbose {
                 verbose_println("IPNS name not published");
-                verbose_newline();
             }
             return Ok(None);
         }
@@ -436,7 +439,6 @@ impl IpfsKv {
 
         if verbose {
             verbose_println("IPFS get operation completed");
-            verbose_newline();
         }
 
         Ok(Some(envelope))

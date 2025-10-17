@@ -1,8 +1,8 @@
 /// Errors that can occur during Mainline DHT put operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PutError {
-    #[error("Key {key} already exists in DHT")]
-    AlreadyExists { key: String },
+    #[error("{arid} already exists")]
+    AlreadyExists { arid: String },
 
     #[error("Value size {size} exceeds DHT limit of 1000 bytes")]
     ValueTooLarge { size: usize },
@@ -24,7 +24,9 @@ impl From<bc_envelope::Error> for PutError {
 }
 
 impl From<dcbor::Error> for PutError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
 }
 
 impl From<mainline::errors::PutQueryError> for PutError {
@@ -40,7 +42,9 @@ impl From<mainline::errors::DecodeIdError> for PutError {
 }
 
 impl From<std::io::Error> for PutError {
-    fn from(e: std::io::Error) -> Self { Self::DhtError(e.to_string()) }
+    fn from(e: std::io::Error) -> Self {
+        Self::DhtError(e.to_string())
+    }
 }
 
 impl From<mainline::errors::PutMutableError> for PutError {
@@ -72,7 +76,9 @@ impl From<bc_envelope::Error> for GetError {
 }
 
 impl From<dcbor::Error> for GetError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
 }
 
 impl From<mainline::errors::DecodeIdError> for GetError {

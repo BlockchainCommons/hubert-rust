@@ -5,7 +5,7 @@ use bc_ur::prelude::*;
 use super::reference::{
     create_reference_envelope, extract_reference_arid, is_reference_envelope,
 };
-use crate::{KvStore, ipfs::IpfsKv, mainline::MainlineDhtKv};
+use crate::{ipfs::IpfsKv, logging::verbose_println, mainline::MainlineDhtKv, KvStore};
 
 /// Hybrid storage layer combining Mainline DHT and IPFS.
 ///
@@ -112,26 +112,26 @@ impl HybridKv {
         if self.fits_in_dht(envelope) {
             // Store directly in DHT
             if verbose {
-                println!(
+                verbose_println(&format!(
                     "Storing envelope in DHT (size ≤ {} bytes)",
                     self.dht_size_limit
-                );
+                ));
             }
             self.dht.put(arid, envelope, ttl_seconds, verbose).await?;
             Ok(format!("Stored in DHT at ARID: {}", arid.ur_string()))
         } else {
             // Use IPFS with DHT reference
             if verbose {
-                println!("Envelope too large for DHT, using IPFS indirection");
+                verbose_println("Envelope too large for DHT, using IPFS indirection");
             }
 
             // 1. Store actual envelope in IPFS with a new ARID
             let reference_arid = ARID::new();
             if verbose {
-                println!(
+                verbose_println(&format!(
                     "Storing actual envelope in IPFS with reference ARID: {}",
                     reference_arid.ur_string()
-                );
+                ));
             }
             self.ipfs
                 .put(&reference_arid, envelope, ttl_seconds, verbose)
@@ -144,7 +144,7 @@ impl HybridKv {
 
             // 3. Store reference in DHT
             if verbose {
-                println!("Storing reference envelope in DHT at original ARID");
+                verbose_println("Storing reference envelope in DHT at original ARID");
             }
             self.dht.put(arid, &reference, ttl_seconds, verbose).await?;
 
@@ -173,9 +173,7 @@ impl HybridKv {
                 // 2. Check if it's a reference envelope
                 if is_reference_envelope(&envelope) {
                     if verbose {
-                        println!(
-                            "Found reference envelope, fetching actual envelope from IPFS"
-                        );
+                        verbose_println("Found reference envelope, fetching actual envelope from IPFS");
                     }
 
                     // 3. Extract reference ARID
@@ -185,10 +183,10 @@ impl HybridKv {
                         })?;
 
                     if verbose {
-                        println!(
+                        verbose_println(&format!(
                             "Reference ARID: {}",
                             reference_arid.ur_string()
-                        );
+                        ));
                     }
 
                     // 4. Retrieve actual envelope from IPFS
@@ -200,9 +198,7 @@ impl HybridKv {
                     match ipfs_envelope {
                         Some(actual) => {
                             if verbose {
-                                println!(
-                                    "Successfully retrieved actual envelope from IPFS"
-                                );
+                                verbose_println("Successfully retrieved actual envelope from IPFS");
                             }
                             Ok(Some(actual))
                         }

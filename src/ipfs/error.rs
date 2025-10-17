@@ -1,8 +1,8 @@
 /// Errors that can occur during IPFS put operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PutError {
-    #[error("IPNS name {ipns_name} already published")]
-    AlreadyExists { ipns_name: String },
+    #[error("{arid} already exists")]
+    AlreadyExists { arid: String },
 
     #[error("Envelope size {size} exceeds practical limit")]
     EnvelopeTooLarge { size: usize },
@@ -27,7 +27,9 @@ impl From<bc_envelope::Error> for PutError {
 }
 
 impl From<dcbor::Error> for PutError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
 }
 
 impl From<ipfs_api_backend_hyper::Error> for PutError {
@@ -62,7 +64,9 @@ impl From<bc_envelope::Error> for GetError {
 }
 
 impl From<dcbor::Error> for GetError {
-    fn from(e: dcbor::Error) -> Self { Self::CborError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::CborError(e.to_string())
+    }
 }
 
 impl From<ipfs_api_backend_hyper::Error> for GetError {

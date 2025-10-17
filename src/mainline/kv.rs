@@ -1,5 +1,6 @@
 use bc_components::ARID;
 use bc_envelope::Envelope;
+use bc_ur::UREncodable;
 use dcbor::CBOREncodable;
 use mainline::{Dht, MutableItem, SigningKey};
 
@@ -159,7 +160,7 @@ impl MainlineDhtKv {
         _ttl_seconds: Option<u64>, // Ignored - DHT has no TTL support
         verbose: bool,
     ) -> Result<String, PutError> {
-        use crate::logging::{verbose_newline, verbose_println};
+        use crate::logging::verbose_println;
 
         if verbose {
             verbose_println("Starting Mainline DHT put operation");
@@ -195,7 +196,7 @@ impl MainlineDhtKv {
             .await
             .is_some()
         {
-            return Err(PutError::AlreadyExists { key: hex::encode(pubkey) });
+            return Err(PutError::AlreadyExists { arid: arid.ur_string() });
         }
 
         // Create mutable item with seq=1 (first write)
@@ -212,7 +213,6 @@ impl MainlineDhtKv {
 
         if verbose {
             verbose_println("Mainline DHT put operation completed");
-            verbose_newline();
         }
 
         Ok(format!("dht://{}", hex::encode(pubkey)))
@@ -269,7 +269,6 @@ impl MainlineDhtKv {
 
                 if verbose {
                     verbose_println("Mainline DHT get operation completed");
-                    verbose_newline();
                 }
 
                 return Ok(Some(envelope));
@@ -281,7 +280,6 @@ impl MainlineDhtKv {
                 if verbose {
                     verbose_newline();
                     verbose_println("Timeout reached, value not found");
-                    verbose_newline();
                 }
                 return Ok(None);
             }

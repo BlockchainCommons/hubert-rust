@@ -84,7 +84,7 @@ pub trait KvStore: Send + Sync {
     ///
     /// # Write-Once Semantics
     ///
-    /// This operation will fail if the ARID already exists in storage. The
+    /// This operation will fail if the ARID already exists. The
     /// implementation must check for existence before writing and return an
     /// appropriate error if the key is already present.
     ///

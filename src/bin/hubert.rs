@@ -12,7 +12,8 @@ use bc_rand::random_data;
 use bc_ur::prelude::*;
 use clap::{Parser, Subcommand, ValueEnum};
 use hubert::{
-    KvStore, SqliteKv, hybrid::HybridKv, ipfs::IpfsKv, mainline::MainlineDhtKv,
+    KvStore, SqliteKv, hybrid::HybridKv, ipfs::IpfsKv,
+    logging::verbose_println, mainline::MainlineDhtKv,
 };
 
 /// Hubert: Secure distributed key-value store for Gordian Envelopes
@@ -32,7 +33,7 @@ struct Cli {
     #[arg(long, global = true)]
     port: Option<u16>,
 
-    /// Enable verbose output with timestamps
+    /// Enable verbose logging
     #[arg(long, short, global = true)]
     verbose: bool,
 
@@ -182,7 +183,9 @@ async fn put_mainline(
         .put(arid, envelope, None, verbose) // No TTL for mainline (not supported)
         .await
         .map_err(|e| anyhow!("{}", e))?;
-    println!("✓ Stored envelope at ARID");
+    if verbose {
+        verbose_println("✓ Stored envelope at ARID");
+    }
     Ok(())
 }
 
@@ -199,7 +202,9 @@ async fn put_ipfs(
         .put(arid, envelope, None, verbose) // No TTL (use IPFS default of 24h)
         .await
         .map_err(|e| anyhow!("{}", e))?;
-    println!("✓ Stored envelope at ARID");
+    if verbose {
+        verbose_println("✓ Stored envelope at ARID");
+    }
     Ok(())
 }
 
@@ -245,7 +250,9 @@ async fn put_hybrid(
         .put(arid, envelope, None, verbose)
         .await
         .map_err(|e| anyhow!("{}", e))?;
-    println!("✓ Stored envelope at ARID");
+    if verbose {
+        verbose_println("✓ Stored envelope at ARID");
+    }
     Ok(())
 }
 
@@ -279,7 +286,9 @@ async fn put_server(
         .put(arid, envelope, ttl, verbose)
         .await
         .map_err(|e| anyhow!("{}", e))?;
-    println!("✓ Stored envelope at ARID");
+    if verbose {
+        verbose_println("✓ Stored envelope at ARID");
+    }
     Ok(())
 }
 
@@ -451,26 +460,70 @@ async fn main() -> Result<()> {
                 println!("✓ Hybrid storage is available (DHT + IPFS)");
             }
             StorageBackend::Server => {
-                // Check if server is reachable
-                use hubert::server::ServerKv;
+                // Check if server is reachable via health endpoint
                 use tokio::time::{Duration, timeout};
 
                 let host = cli.host.as_deref().unwrap_or("127.0.0.1");
                 let port = cli.port.unwrap_or(45678);
-                let url = format!("http://{}:{}", host, port);
-                let store = ServerKv::new(&url);
-                // Try to get a non-existent ARID to check connectivity
-                let test_arid = ARID::new();
+                let url = format!("http://{}:{}/health", host, port);
 
-                // Wrap the entire check in a 2-second timeout
-                match timeout(
-                    Duration::from_secs(2),
-                    store.get(&test_arid, Some(1), false),
-                )
-                .await
+                let client = reqwest::Client::new();
+
+                // Try to connect to health endpoint with 2-second timeout
+                match timeout(Duration::from_secs(2), client.get(&url).send())
+                    .await
                 {
-                    Ok(Ok(_)) => {
-                        println!("✓ Server is available at {}:{}", host, port);
+                    Ok(Ok(response)) => {
+                        if response.status().is_success() {
+                            // Try to parse the JSON response
+                            if let Ok(text) = response.text().await {
+                                if let Ok(json) =
+                                    serde_json::from_str::<serde_json::Value>(
+                                        &text,
+                                    )
+                                {
+                                    if json
+                                        .get("server")
+                                        .and_then(|v| v.as_str())
+                                        == Some("hubert")
+                                    {
+                                        let version = json
+                                            .get("version")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown");
+                                        println!(
+                                            "✓ Hubert server is available at {}:{} (version {})",
+                                            host, port, version
+                                        );
+                                    } else {
+                                        bail!(
+                                            "✗ Server at {}:{} is not a Hubert server",
+                                            host,
+                                            port
+                                        );
+                                    }
+                                } else {
+                                    bail!(
+                                        "✗ Server at {}:{} returned invalid health response",
+                                        host,
+                                        port
+                                    );
+                                }
+                            } else {
+                                bail!(
+                                    "✗ Server at {}:{} returned invalid health response",
+                                    host,
+                                    port
+                                );
+                            }
+                        } else {
+                            bail!(
+                                "✗ Server at {}:{} is not available (status: {})",
+                                host,
+                                port,
+                                response.status()
+                            );
+                        }
                     }
                     Ok(Err(e)) => {
                         bail!(

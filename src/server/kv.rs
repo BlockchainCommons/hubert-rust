@@ -76,7 +76,7 @@ impl KvStore for ServerKv {
         ttl_seconds: Option<u64>,
         verbose: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::logging::{verbose_newline, verbose_println};
+        use crate::logging::verbose_println;
 
         bc_components::register_tags();
 
@@ -108,10 +108,10 @@ impl KvStore for ServerKv {
 
         let result = match response.status() {
             reqwest::StatusCode::OK => Ok("Stored successfully".to_string()),
-            reqwest::StatusCode::CONFLICT => {
-                Err(Box::new(PutError::AlreadyExists)
-                    as Box<dyn std::error::Error + Send + Sync>)
-            }
+            reqwest::StatusCode::CONFLICT => Err(Box::new(
+                PutError::AlreadyExists { arid: arid.ur_string() },
+            )
+                as Box<dyn std::error::Error + Send + Sync>),
             _ => {
                 let error_msg = response.text().await.unwrap_or_default();
                 Err(Box::new(PutError::ServerError(error_msg))
@@ -125,7 +125,6 @@ impl KvStore for ServerKv {
             } else {
                 verbose_println("Server put operation failed");
             }
-            verbose_newline();
         }
 
         result
@@ -191,7 +190,6 @@ impl KvStore for ServerKv {
 
                     if verbose {
                         verbose_println("Server get operation completed");
-                        verbose_newline();
                     }
 
                     return Ok(Some(envelope));
@@ -203,7 +201,6 @@ impl KvStore for ServerKv {
                         if verbose {
                             verbose_newline();
                             verbose_println("Timeout reached, value not found");
-                            verbose_newline();
                         }
                         return Ok(None);
                     }

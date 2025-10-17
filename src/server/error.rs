@@ -1,8 +1,8 @@
 /// Errors that can occur during server put operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PutError {
-    #[error("ARID already exists")]
-    AlreadyExists,
+    #[error("{arid} already exists")]
+    AlreadyExists { arid: String },
 
     #[error("Network error: {0}")]
     NetworkError(String),
@@ -15,15 +15,21 @@ pub enum PutError {
 }
 
 impl From<reqwest::Error> for PutError {
-    fn from(e: reqwest::Error) -> Self { Self::NetworkError(e.to_string()) }
+    fn from(e: reqwest::Error) -> Self {
+        Self::NetworkError(e.to_string())
+    }
 }
 
 impl From<bc_envelope::Error> for PutError {
-    fn from(e: bc_envelope::Error) -> Self { Self::ParseError(e.to_string()) }
+    fn from(e: bc_envelope::Error) -> Self {
+        Self::ParseError(e.to_string())
+    }
 }
 
 impl From<dcbor::Error> for PutError {
-    fn from(e: dcbor::Error) -> Self { Self::ParseError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::ParseError(e.to_string())
+    }
 }
 
 /// Errors that can occur during server get operations.
@@ -43,13 +49,19 @@ pub enum GetError {
 }
 
 impl From<reqwest::Error> for GetError {
-    fn from(e: reqwest::Error) -> Self { Self::NetworkError(e.to_string()) }
+    fn from(e: reqwest::Error) -> Self {
+        Self::NetworkError(e.to_string())
+    }
 }
 
 impl From<bc_envelope::Error> for GetError {
-    fn from(e: bc_envelope::Error) -> Self { Self::ParseError(e.to_string()) }
+    fn from(e: bc_envelope::Error) -> Self {
+        Self::ParseError(e.to_string())
+    }
 }
 
 impl From<dcbor::Error> for GetError {
-    fn from(e: dcbor::Error) -> Self { Self::ParseError(e.to_string()) }
+    fn from(e: dcbor::Error) -> Self {
+        Self::ParseError(e.to_string())
+    }
 }
