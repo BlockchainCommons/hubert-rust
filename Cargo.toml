@@ -8,41 +8,35 @@ name = "hubert"
 path = "src/bin/hubert.rs"
 
 [dependencies]
-bc-crypto = "^0.10.0"
-dcbor = { version = "^0.23.0", features = ["multithreaded"] }
 bc-components = "^0.25.0"
+bc-crypto = "^0.10.0"
 bc-envelope = { version = "^0.34.0", features = ["multithreaded"] }
+bc-rand = "^0.4.0"
 bc-ur = "^0.13.0"
 bc-xid = "^0.13.0"
+dcbor = { version = "^0.23.0", features = ["multithreaded"] }
 gstp = "^0.10.0"
 known-values = "^0.8.0"
 
+anyhow = "^1.0.0"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["macros"] }
+clap = { version = "^4.4.3", features = ["derive", "unstable-styles"] }
+futures-util = "0.3"
+hex = "0.4"
 ipfs-api-backend-hyper = "0.6.0"
 ipfs-api-prelude = "0.6.0"
 mainline = "6"
-thiserror = "2"
-hex = "0.4"
-tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }
-futures-util = "0.3"
-async-trait = "0.1"
-clap = { version = "^4.4.3", features = ["derive", "unstable-styles"] }
-anyhow = "^1.0.0"
 reqwest = "0.12"
-axum = { version = "0.7", features = ["macros"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlite = "0.37.0"
-bc-rand = "^0.4.0"
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
 
 [dev-dependencies]
-futures-util = "0.3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-anyhow = "1"
-chrono = "0.4"
-reqwest = "0.12"
 assert_cmd = "2"
-bc-components = "^0.25.0"
-bc-envelope = { version = "^0.34.0", features = ["multithreaded"] }
-hex = "0.4"
+chrono = "0.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
