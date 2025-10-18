@@ -9,10 +9,12 @@ use ipfs_api_prelude::request::KeyType;
 use tokio::time::{Duration, Instant, sleep};
 
 use super::{
-    error::{GetError, PutError},
+    error::Error as IpfsError,
     value::{add_bytes, cat_bytes, pin_cid},
 };
-use crate::{KvStore, arid_derivation::derive_ipfs_key_name};
+use crate::{
+    Error, Result, KvStore, arid_derivation::derive_ipfs_key_name,
+};
 
 /// IPFS-backed key-value store using IPNS for ARID-based addressing.
 ///
@@ -96,10 +98,7 @@ impl IpfsKv {
     }
 
     /// Get or create an IPNS key for the given ARID.
-    async fn get_or_create_key(
-        &self,
-        arid: &ARID,
-    ) -> Result<KeyInfo, PutError> {
+    async fn get_or_create_key(&self, arid: &ARID) -> Result<KeyInfo> {
         let key_name = derive_ipfs_key_name(arid);
 
         // Check cache first
@@ -111,7 +110,7 @@ impl IpfsKv {
         }
 
         // List existing keys to see if it already exists
-        let keys = self.client.key_list().await?;
+        let keys = self.client.key_list().await.map_err(IpfsError::from)?;
 
         if let Some(key) = keys.keys.iter().find(|k| k.name == key_name) {
             let info = KeyInfo { peer_id: key.id.clone() };
@@ -125,7 +124,7 @@ impl IpfsKv {
 
         // Generate new key
         let key_info =
-            self.client.key_gen(&key_name, KeyType::Ed25519, 0).await?;
+            self.client.key_gen(&key_name, KeyType::Ed25519, 0).await.map_err(IpfsError::from)?;
 
         let info = KeyInfo { peer_id: key_info.id };
 
@@ -139,7 +138,7 @@ impl IpfsKv {
     }
 
     /// Check if an IPNS name is already published.
-    async fn is_published(&self, peer_id: &str) -> Result<bool, PutError> {
+    async fn is_published(&self, peer_id: &str) -> Result<bool> {
         match self.client.name_resolve(Some(peer_id), false, false).await {
             Ok(_) => Ok(true),
             Err(e) => {
@@ -151,7 +150,7 @@ impl IpfsKv {
                 {
                     Ok(false)
                 } else {
-                    Err(PutError::DaemonError(err_str))
+                    Err(IpfsError::DaemonError(e).into())
                 }
             }
         }
@@ -165,10 +164,10 @@ impl IpfsKv {
         cid: &str,
         ttl_seconds: Option<u64>,
         arid: &ARID,
-    ) -> Result<(), PutError> {
+    ) -> crate::Result<()> {
         // Check if already published
         if self.is_published(peer_id).await? {
-            return Err(PutError::AlreadyExists { arid: arid.ur_string() });
+            return Err(Error::AlreadyExists { arid: arid.ur_string() });
         }
 
         // Convert TTL seconds to lifetime string for IPNS
@@ -195,8 +194,8 @@ impl IpfsKv {
                 None,                // Cache TTL hint
                 Some(key_name),
             )
-            .await?;
-
+            .await
+            .map_err(IpfsError::from)?;
         Ok(())
     }
 
@@ -206,7 +205,7 @@ impl IpfsKv {
         peer_id: &str,
         timeout: Duration,
         verbose: bool,
-    ) -> Result<Option<String>, GetError> {
+    ) -> crate::Result<Option<String>> {
         use crate::logging::verbose_print_dot;
 
         let deadline = Instant::now() + timeout;
@@ -221,10 +220,7 @@ impl IpfsKv {
                     if let Some(cid) = res.path.strip_prefix("/ipfs/") {
                         return Ok(Some(cid.to_string()));
                     } else {
-                        return Err(GetError::DaemonError(format!(
-                            "unexpected IPNS path format: {}",
-                            res.path
-                        )));
+                        return Err(IpfsError::UnexpectedIpnsPathFormat(res.path).into());
                     }
                 }
                 Err(e) => {
@@ -239,7 +235,7 @@ impl IpfsKv {
 
                     // Check if we've timed out
                     if Instant::now() >= deadline {
-                        return Err(GetError::Timeout);
+                        return Err(IpfsError::Timeout.into());
                     }
 
                     // Print polling dot if verbose
@@ -263,12 +259,8 @@ impl KvStore for IpfsKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope, ttl_seconds, verbose)
-            .await
-            .map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })
+    ) -> Result<String> {
+        self.put_impl(arid, envelope, ttl_seconds, verbose).await
     }
 
     async fn get(
@@ -276,22 +268,12 @@ impl KvStore for IpfsKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
-    {
-        self.get_impl(arid, timeout_seconds, verbose)
-            .await
-            .map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })
+    ) -> Result<Option<Envelope>> {
+        self.get_impl(arid, timeout_seconds, verbose).await
     }
 
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        self.exists_impl(arid).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+    async fn exists(&self, arid: &ARID) -> Result<bool> {
+        self.exists_impl(arid).await
     }
 }
 
@@ -303,7 +285,7 @@ impl IpfsKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, PutError> {
+    ) -> crate::Result<String> {
         use crate::logging::verbose_println;
 
         if verbose {
@@ -315,7 +297,9 @@ impl IpfsKv {
 
         // Check size
         if bytes.len() > self.max_envelope_size {
-            return Err(PutError::EnvelopeTooLarge { size: bytes.len() });
+            return Err(IpfsError::EnvelopeTooLarge {
+                size: bytes.len(),
+            }.into());
         }
 
         if verbose {
@@ -374,7 +358,7 @@ impl IpfsKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, GetError> {
+    ) -> crate::Result<Option<Envelope>> {
         use crate::logging::{verbose_newline, verbose_println};
 
         if verbose {
@@ -387,7 +371,7 @@ impl IpfsKv {
         if verbose {
             verbose_println("Looking up IPNS key");
         }
-        let keys = self.client.key_list().await?;
+        let keys = self.client.key_list().await.map_err(IpfsError::from)?;
 
         let key = keys.keys.iter().find(|k| k.name == key_name);
         if key.is_none() {
@@ -445,11 +429,11 @@ impl IpfsKv {
     }
 
     /// Internal exists implementation with typed errors.
-    async fn exists_impl(&self, arid: &ARID) -> Result<bool, GetError> {
+    async fn exists_impl(&self, arid: &ARID) -> crate::Result<bool> {
         let key_name = derive_ipfs_key_name(arid);
 
         // List keys to check if key exists
-        let keys = self.client.key_list().await?;
+        let keys = self.client.key_list().await.map_err(IpfsError::from)?;
 
         let key = keys.keys.iter().find(|k| k.name == key_name);
         if key.is_none() {
@@ -469,7 +453,7 @@ impl IpfsKv {
                 {
                     Ok(false)
                 } else {
-                    Err(GetError::DaemonError(err_str))
+                    Err(IpfsError::DaemonError(e).into())
                 }
             }
         }

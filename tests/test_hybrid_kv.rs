@@ -27,30 +27,35 @@ async fn setup() -> HybridKv {
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_basic_roundtrip() {
+    bc_components::register_tags();
     common::kv_tests::test_basic_roundtrip(&setup().await).await;
 }
 
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_write_once() {
+    bc_components::register_tags();
     common::kv_tests::test_write_once(&setup().await).await;
 }
 
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_nonexistent_arid() {
+    bc_components::register_tags();
     common::kv_tests::test_nonexistent_arid(&setup().await).await;
 }
 
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_multiple_arids() {
+    bc_components::register_tags();
     common::kv_tests::test_multiple_arids(&setup().await).await;
 }
 
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_small_envelope_uses_dht_only() {
+    bc_components::register_tags();
     let store = setup().await;
     let arid = ARID::new();
 
@@ -85,6 +90,7 @@ async fn hybrid_small_envelope_uses_dht_only() {
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_large_envelope_uses_ipfs_indirection() {
+    bc_components::register_tags();
     let store = setup().await;
     let arid = ARID::new();
 
@@ -120,6 +126,7 @@ async fn hybrid_large_envelope_uses_ipfs_indirection() {
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_boundary_condition() {
+    bc_components::register_tags();
     let store = setup().await;
 
     // Test envelope right at the boundary (1000 bytes)
@@ -145,6 +152,7 @@ async fn hybrid_boundary_condition() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_concurrent_operations() {
+    bc_components::register_tags();
     let _testnet = Testnet::new_async(5).await.unwrap();
     let store1 =
         Arc::new(HybridKv::new("http://127.0.0.1:5001").await.unwrap());
@@ -156,6 +164,7 @@ async fn hybrid_concurrent_operations() {
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_exists_check() {
+    bc_components::register_tags();
     let store = setup().await;
 
     let arid1 = ARID::new();
@@ -191,6 +200,7 @@ async fn hybrid_exists_check() {
 #[tokio::test]
 #[ignore] // Requires IPFS daemon
 async fn hybrid_get_timeout() {
+    bc_components::register_tags();
     use tokio::time::Instant;
 
     let store = setup().await;

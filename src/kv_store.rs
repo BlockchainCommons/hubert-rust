@@ -1,7 +1,7 @@
-use std::error::Error;
-
 use bc_components::ARID;
 use bc_envelope::Envelope;
+
+use crate::Result;
 
 /// Unified trait for key-value storage backends using ARID-based addressing.
 ///
@@ -137,7 +137,7 @@ pub trait KvStore: Send + Sync {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn Error + Send + Sync>>;
+    ) -> Result<String>;
 
     /// Retrieve an envelope for the given ARID.
     ///
@@ -178,7 +178,7 @@ pub trait KvStore: Send + Sync {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Option<Envelope>>;
 
     /// Check if an envelope exists at the given ARID.
     ///
@@ -213,5 +213,5 @@ pub trait KvStore: Send + Sync {
     async fn exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>>;
+    ) -> Result<bool>;
 }

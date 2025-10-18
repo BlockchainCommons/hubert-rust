@@ -1,5 +1,5 @@
 mod error;
 mod kv;
 
-pub use error::{GetError, PutError};
+pub use error::Error;
 pub use kv::MainlineDhtKv;

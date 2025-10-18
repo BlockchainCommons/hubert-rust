@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
@@ -10,7 +9,7 @@ use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use tokio::time::sleep;
 
-use crate::KvStore;
+use crate::{Error, Result, KvStore};
 
 /// In-memory key-value store for Gordian Envelopes.
 ///
@@ -37,7 +36,7 @@ impl MemoryKv {
     fn check_exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> Result<bool> {
         let storage = self.storage.read().unwrap();
 
         if let Some(entry) = storage.get(arid) {
@@ -69,7 +68,7 @@ impl KvStore for MemoryKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn Error + Send + Sync>> {
+    ) -> Result<String> {
         use crate::logging::verbose_println;
 
         let mut storage = self.storage.write().unwrap();
@@ -82,7 +81,7 @@ impl KvStore for MemoryKv {
                     arid.ur_string()
                 ));
             }
-            return Err("ARID already exists".into());
+            return Err(Error::AlreadyExists { arid: arid.ur_string() });
         }
 
         let expires_at =
@@ -110,7 +109,7 @@ impl KvStore for MemoryKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Option<Envelope>> {
         use crate::logging::verbose_println;
 
         let timeout = timeout_seconds.unwrap_or(30);
@@ -187,7 +186,7 @@ impl KvStore for MemoryKv {
     async fn exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> Result<bool> {
         self.check_exists(arid)
     }
 }

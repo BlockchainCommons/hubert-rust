@@ -1,7 +1,7 @@
 use bc_components::ARID;
 use bc_envelope::prelude::*;
 
-use super::error::ReferenceError;
+use super::error::Error;
 
 /// Creates a reference envelope that points to content stored in IPFS.
 ///
@@ -102,12 +102,10 @@ pub fn is_reference_envelope(envelope: &Envelope) -> bool {
 /// # Returns
 ///
 /// - `Ok(ARID)` if the reference ARID was successfully extracted
-/// - `Err(ReferenceError)` if the envelope is not a reference or the ARID is invalid
-pub fn extract_reference_arid(
-    envelope: &Envelope,
-) -> Result<ARID, ReferenceError> {
+/// - `Err(HybridError)` if the envelope is not a reference or the ARID is invalid
+pub fn extract_reference_arid(envelope: &Envelope) -> Result<ARID, Error> {
     if !is_reference_envelope(envelope) {
-        return Err(ReferenceError::NotReferenceEnvelope);
+        return Err(Error::NotReferenceEnvelope);
     }
 
     // Find the id assertion and extract the ARID
@@ -121,7 +119,7 @@ pub fn extract_reference_arid(
                             if let Ok(arid) = ARID::try_from(cbor.clone()) {
                                 return Ok(arid);
                             } else {
-                                return Err(ReferenceError::InvalidArid);
+                                return Err(Error::InvalidReferenceArid);
                             }
                         }
                     }
@@ -130,7 +128,7 @@ pub fn extract_reference_arid(
         }
     }
 
-    Err(ReferenceError::NoIdAssertion)
+    Err(Error::NoIdAssertion)
 }
 
 #[cfg(test)]

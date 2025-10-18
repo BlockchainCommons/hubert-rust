@@ -55,7 +55,7 @@ enum StorageBackend {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Generate a new ARID
+    /// Generate a new ARID or example Envelope
     Generate {
         #[command(subcommand)]
         generate_type: GenerateType,
@@ -299,10 +299,10 @@ async fn put_server(
     ttl: Option<u64>,
     verbose: bool,
 ) -> Result<()> {
-    use hubert::server::ServerKv;
+    use hubert::server::ServerKvClient;
 
     let url = format!("http://{}:{}", host, port);
-    let store = ServerKv::new(&url);
+    let store = ServerKvClient::new(&url);
     store
         .put(arid, envelope, ttl, verbose)
         .await
@@ -320,10 +320,10 @@ async fn get_server(
     timeout: u64,
     verbose: bool,
 ) -> Result<Option<Envelope>> {
-    use hubert::server::ServerKv;
+    use hubert::server::ServerKvClient;
 
     let url = format!("http://{}:{}", host, port);
-    let store = ServerKv::new(&url);
+    let store = ServerKvClient::new(&url);
     store
         .get(arid, Some(timeout), verbose)
         .await

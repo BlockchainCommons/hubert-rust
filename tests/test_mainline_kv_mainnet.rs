@@ -59,36 +59,42 @@ macro_rules! skip_if_no_mainnet {
 
 #[tokio::test]
 async fn mainnet_basic_roundtrip() {
+    bc_components::register_tags();
     let store = skip_if_no_mainnet!(setup().await);
     common::kv_tests::test_basic_roundtrip(&store).await;
 }
 
 #[tokio::test]
 async fn mainnet_write_once() {
+    bc_components::register_tags();
     let store = skip_if_no_mainnet!(setup().await);
     common::kv_tests::test_write_once(&store).await;
 }
 
 #[tokio::test]
 async fn mainnet_nonexistent_arid() {
+    bc_components::register_tags();
     let store = skip_if_no_mainnet!(setup().await);
     common::kv_tests::test_nonexistent_arid(&store).await;
 }
 
 #[tokio::test]
 async fn mainnet_multiple_arids() {
+    bc_components::register_tags();
     let store = skip_if_no_mainnet!(setup().await);
     common::kv_tests::test_multiple_arids(&store).await;
 }
 
 #[tokio::test]
 async fn mainnet_size_limit() {
+    bc_components::register_tags();
     let store = skip_if_no_mainnet!(setup().await);
     common::kv_tests::test_size_limit(&store, 1000).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mainnet_concurrent_operations() {
+    bc_components::register_tags();
     if setup().await.is_none() {
         eprintln!(
             "⚠️  Skipping test: Cannot connect to Mainline DHT (no internet or firewall blocked)"

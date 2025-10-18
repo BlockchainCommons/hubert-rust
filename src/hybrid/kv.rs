@@ -5,7 +5,8 @@ use bc_ur::prelude::*;
 use super::reference::{
     create_reference_envelope, extract_reference_arid, is_reference_envelope,
 };
-use crate::{ipfs::IpfsKv, logging::verbose_println, mainline::MainlineDhtKv, KvStore};
+use super::Error as HybridError;
+use crate::{ipfs::IpfsKv, logging::verbose_println, mainline::MainlineDhtKv, Result, KvStore};
 
 /// Hybrid storage layer combining Mainline DHT and IPFS.
 ///
@@ -67,7 +68,7 @@ impl HybridKv {
     /// Returns error if DHT client initialization fails.
     pub async fn new(
         ipfs_rpc_url: &str,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Self> {
         let dht = MainlineDhtKv::new().await?;
         let ipfs = IpfsKv::new(ipfs_rpc_url);
 
@@ -107,7 +108,7 @@ impl HybridKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<String> {
         // Check if it fits in DHT
         if self.fits_in_dht(envelope) {
             // Store directly in DHT
@@ -162,7 +163,7 @@ impl HybridKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<Envelope>>
     {
         // 1. Try to get from DHT
         let dht_envelope = self.dht.get(arid, timeout_seconds, verbose).await?;
@@ -177,10 +178,7 @@ impl HybridKv {
                     }
 
                     // 3. Extract reference ARID
-                    let reference_arid = extract_reference_arid(&envelope)
-                        .map_err(|e| {
-                            format!("Invalid reference envelope: {}", e)
-                        })?;
+                    let reference_arid = extract_reference_arid(&envelope)?;
 
                     if verbose {
                         verbose_println(&format!(
@@ -202,7 +200,7 @@ impl HybridKv {
                             }
                             Ok(Some(actual))
                         }
-                        None => Err("Referenced IPFS content not found".into()),
+                        None => Err(HybridError::ContentNotFound.into()),
                     }
                 } else {
                     // Not a reference, return the DHT envelope directly
@@ -221,7 +219,7 @@ impl KvStore for HybridKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<String> {
         self.put_impl(arid, envelope, ttl_seconds, verbose).await
     }
 
@@ -230,7 +228,7 @@ impl KvStore for HybridKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<Option<Envelope>>
     {
         self.get_impl(arid, timeout_seconds, verbose).await
     }
@@ -238,7 +236,7 @@ impl KvStore for HybridKv {
     async fn exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<bool> {
         // Check DHT only (references count as existing)
         self.dht.exists(arid).await
     }

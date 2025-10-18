@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -10,8 +9,8 @@ use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use sqlite::{Connection, State};
 use tokio::time::sleep;
-
-use crate::KvStore;
+use super::Error as ServerError;
+use crate::{Error, Result, KvStore};
 
 /// SQLite-backed key-value store for Gordian Envelopes.
 ///
@@ -36,15 +35,15 @@ impl SqliteKv {
     /// A new `SqliteKv` instance with the database initialized.
     pub fn new<P: AsRef<Path>>(
         path: P,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Self> {
         let db_path = path.as_ref().to_path_buf();
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(ServerError::from)?;
         }
 
-        let connection = sqlite::open(&db_path)?;
+        let connection = sqlite::open(&db_path).map_err(ServerError::from)?;
 
         // Create table if it doesn't exist
         let schema = "
@@ -55,7 +54,7 @@ impl SqliteKv {
             );
             CREATE INDEX IF NOT EXISTS idx_expires_at ON hubert_store(expires_at);
         ";
-        connection.execute(schema)?;
+        connection.execute(schema).map_err(ServerError::from)?;
 
         let kv = Self {
             db_path,
@@ -131,29 +130,29 @@ impl SqliteKv {
     fn check_exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> Result<bool> {
         let arid_str = arid.ur_string();
         let now =
-            SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+            SystemTime::now().duration_since(UNIX_EPOCH).map_err(ServerError::from)?.as_secs() as i64;
 
         let conn = self.connection.lock().unwrap();
         let query = "SELECT expires_at FROM hubert_store WHERE arid = ?";
-        let mut stmt = conn.prepare(query)?;
-        stmt.bind((1, arid_str.as_str()))?;
+        let mut stmt = conn.prepare(query).map_err(ServerError::from)?;
+        stmt.bind((1, arid_str.as_str())).map_err(ServerError::from)?;
 
-        match stmt.next()? {
+        match stmt.next().map_err(ServerError::from)? {
             State::Row => {
                 // Check if expired
-                let expires_at: Option<i64> = stmt.read(0)?;
+                let expires_at: Option<i64> = stmt.read(0).map_err(ServerError::from)?;
                 if let Some(expiry) = expires_at {
                     if now >= expiry {
                         // Entry is expired, remove it
                         drop(stmt);
                         let delete_query =
                             "DELETE FROM hubert_store WHERE arid = ?";
-                        let mut delete_stmt = conn.prepare(delete_query)?;
-                        delete_stmt.bind((1, arid_str.as_str()))?;
-                        delete_stmt.next()?;
+                        let mut delete_stmt = conn.prepare(delete_query).map_err(ServerError::from)?;
+                        delete_stmt.bind((1, arid_str.as_str())).map_err(ServerError::from)?;
+                        delete_stmt.next().map_err(ServerError::from)?;
                         Ok(false)
                     } else {
                         Ok(true)
@@ -175,7 +174,7 @@ impl KvStore for SqliteKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn Error + Send + Sync>> {
+    ) -> Result<String> {
         use crate::logging::verbose_println;
 
         // Check if already exists
@@ -186,7 +185,7 @@ impl KvStore for SqliteKv {
                     arid.ur_string()
                 ));
             }
-            return Err("ARID already exists".into());
+            return Err(Error::AlreadyExists { arid: arid.ur_string() });
         }
 
         let arid_str = arid.ur_string();
@@ -202,17 +201,17 @@ impl KvStore for SqliteKv {
 
         let conn = self.connection.lock().unwrap();
         let query = "INSERT INTO hubert_store (arid, envelope, expires_at) VALUES (?, ?, ?)";
-        let mut stmt = conn.prepare(query)?;
-        stmt.bind((1, arid_str.as_str()))?;
-        stmt.bind((2, envelope_str.as_str()))?;
+        let mut stmt = conn.prepare(query).map_err(ServerError::from)?;
+        stmt.bind((1, arid_str.as_str())).map_err(ServerError::from)?;
+        stmt.bind((2, envelope_str.as_str())).map_err(ServerError::from)?;
 
         if let Some(expiry) = expires_at {
-            stmt.bind((3, expiry))?;
+            stmt.bind((3, expiry)).map_err(ServerError::from)?;
         } else {
-            stmt.bind((3, sqlite::Value::Null))?;
+            stmt.bind((3, sqlite::Value::Null)).map_err(ServerError::from)?;
         }
 
-        stmt.next()?;
+        stmt.next().map_err(ServerError::from)?;
 
         if verbose {
             let ttl_msg = ttl_seconds
@@ -234,7 +233,7 @@ impl KvStore for SqliteKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Option<Envelope>> {
         use crate::logging::verbose_println;
 
         let timeout = timeout_seconds.unwrap_or(30);
@@ -244,18 +243,18 @@ impl KvStore for SqliteKv {
         loop {
             let arid_str = arid.ur_string();
             let now =
-                SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+                SystemTime::now().duration_since(UNIX_EPOCH).map_err(ServerError::from)?.as_secs() as i64;
 
             let result = {
                 let conn = self.connection.lock().unwrap();
                 let query = "SELECT envelope, expires_at FROM hubert_store WHERE arid = ?";
-                let mut stmt = conn.prepare(query)?;
-                stmt.bind((1, arid_str.as_str()))?;
+                let mut stmt = conn.prepare(query).map_err(ServerError::from)?;
+                stmt.bind((1, arid_str.as_str())).map_err(ServerError::from)?;
 
-                match stmt.next()? {
+                match stmt.next().map_err(ServerError::from)? {
                     State::Row => {
-                        let envelope_str: String = stmt.read(0)?;
-                        let expires_at: Option<i64> = stmt.read(1)?;
+                        let envelope_str: String = stmt.read(0).map_err(ServerError::from)?;
+                        let expires_at: Option<i64> = stmt.read(1).map_err(ServerError::from)?;
 
                         // Check if expired
                         if let Some(expiry) = expires_at {
@@ -292,9 +291,9 @@ impl KvStore for SqliteKv {
                     let conn = self.connection.lock().unwrap();
                     let delete_query =
                         "DELETE FROM hubert_store WHERE arid = ?";
-                    let mut delete_stmt = conn.prepare(delete_query)?;
-                    delete_stmt.bind((1, arid_str.as_str()))?;
-                    delete_stmt.next()?;
+                    let mut delete_stmt = conn.prepare(delete_query).map_err(ServerError::from)?;
+                    delete_stmt.bind((1, arid_str.as_str())).map_err(ServerError::from)?;
+                    delete_stmt.next().map_err(ServerError::from)?;
 
                     if verbose {
                         verbose_println(&format!(
@@ -340,7 +339,7 @@ impl KvStore for SqliteKv {
     async fn exists(
         &self,
         arid: &ARID,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> Result<bool> {
         self.check_exists(arid)
     }
 }

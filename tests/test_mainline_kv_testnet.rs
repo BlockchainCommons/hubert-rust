@@ -20,31 +20,37 @@ async fn setup() -> MainlineDhtKv {
 
 #[tokio::test]
 async fn mainline_basic_roundtrip() {
+    bc_components::register_tags();
     common::kv_tests::test_basic_roundtrip(&setup().await).await;
 }
 
 #[tokio::test]
 async fn mainline_write_once() {
+    bc_components::register_tags();
     common::kv_tests::test_write_once(&setup().await).await;
 }
 
 #[tokio::test]
 async fn mainline_nonexistent_arid() {
+    bc_components::register_tags();
     common::kv_tests::test_nonexistent_arid(&setup().await).await;
 }
 
 #[tokio::test]
 async fn mainline_multiple_arids() {
+    bc_components::register_tags();
     common::kv_tests::test_multiple_arids(&setup().await).await;
 }
 
 #[tokio::test]
 async fn mainline_size_limit() {
+    bc_components::register_tags();
     common::kv_tests::test_size_limit(&setup().await, 1000).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mainline_concurrent_operations() {
+    bc_components::register_tags();
     let _testnet = Testnet::new_async(5).await.unwrap();
     let store1 = Arc::new(MainlineDhtKv::new().await.unwrap());
     let store2 = Arc::new(MainlineDhtKv::new().await.unwrap());
@@ -53,6 +59,7 @@ async fn mainline_concurrent_operations() {
 
 #[tokio::test]
 async fn mainline_get_timeout() {
+    bc_components::register_tags();
     use bc_components::ARID;
     use hubert::KvStore;
     use tokio::time::Instant;

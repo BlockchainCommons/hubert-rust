@@ -2,8 +2,8 @@ use bc_components::ARID;
 use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 
-use super::error::{GetError, PutError};
-use crate::KvStore;
+use super::error::Error as ServerError;
+use crate::{Error, KvStore, Result};
 
 /// Server-backed key-value store using HTTP API.
 ///
@@ -15,10 +15,10 @@ use crate::KvStore;
 /// ```no_run
 /// use bc_components::ARID;
 /// use bc_envelope::Envelope;
-/// use hubert::{KvStore, server::ServerKv};
+/// use hubert::{KvStore, server::ServerKvClient};
 ///
 /// # async fn example() {
-/// let store = ServerKv::new("http://127.0.0.1:45678");
+/// let store = ServerKvClient::new("http://127.0.0.1:45678");
 /// let arid = ARID::new();
 /// let envelope = Envelope::new("Hello, Server!");
 ///
@@ -31,12 +31,12 @@ use crate::KvStore;
 /// }
 /// # }
 /// ```
-pub struct ServerKv {
+pub struct ServerKvClient {
     base_url: String,
     client: reqwest::Client,
 }
 
-impl ServerKv {
+impl ServerKvClient {
     /// Create a new server KV store client.
     pub fn new(base_url: &str) -> Self {
         Self {
@@ -58,24 +58,20 @@ impl ServerKv {
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: u64,
-    ) -> Result<(), PutError> {
-        use crate::KvStore;
-        self.put(arid, envelope, Some(ttl_seconds), false)
-            .await
-            .map(|_| ())
-            .map_err(|e| PutError::ServerError(e.to_string()))
+    ) -> Result<String> {
+        self.put(arid, envelope, Some(ttl_seconds), false).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
-impl KvStore for ServerKv {
+impl KvStore for ServerKvClient {
     async fn put(
         &self,
         arid: &ARID,
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<String> {
         use crate::logging::verbose_println;
 
         bc_components::register_tags();
@@ -101,21 +97,16 @@ impl KvStore for ServerKv {
             .body(body)
             .send()
             .await
-            .map_err(|e| {
-                Box::new(PutError::from(e))
-                    as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            .map_err(ServerError::from)?;
 
         let result = match response.status() {
             reqwest::StatusCode::OK => Ok("Stored successfully".to_string()),
-            reqwest::StatusCode::CONFLICT => Err(Box::new(
-                PutError::AlreadyExists { arid: arid.ur_string() },
-            )
-                as Box<dyn std::error::Error + Send + Sync>),
+            reqwest::StatusCode::CONFLICT => {
+                Err(Error::AlreadyExists { arid: arid.ur_string() })
+            }
             _ => {
                 let error_msg = response.text().await.unwrap_or_default();
-                Err(Box::new(PutError::ServerError(error_msg))
-                    as Box<dyn std::error::Error + Send + Sync>)
+                Err(ServerError::General(error_msg).into())
             }
         };
 
@@ -135,8 +126,7 @@ impl KvStore for ServerKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<Option<Envelope>> {
         use tokio::time::{Duration, Instant, sleep};
 
         use crate::logging::{
@@ -167,10 +157,7 @@ impl KvStore for ServerKv {
                 .body(body)
                 .send()
                 .await
-                .map_err(|e| {
-                    Box::new(GetError::from(e))
-                        as Box<dyn std::error::Error + Send + Sync>
-                })?;
+                .map_err(ServerError::from)?;
 
             match response.status() {
                 reqwest::StatusCode::OK => {
@@ -179,14 +166,10 @@ impl KvStore for ServerKv {
                         verbose_println("Value found on server");
                     }
                     let envelope_str = response.text().await.map_err(|e| {
-                        Box::new(GetError::NetworkError(e.to_string()))
-                            as Box<dyn std::error::Error + Send + Sync>
+                        ServerError::NetworkError(e.to_string())
                     })?;
                     let envelope = Envelope::from_ur_string(&envelope_str)
-                        .map_err(|e| {
-                            Box::new(GetError::ParseError(e.to_string()))
-                                as Box<dyn std::error::Error + Send + Sync>
-                        })?;
+                        .map_err(|e| ServerError::ParseError(e.to_string()))?;
 
                     if verbose {
                         verbose_println("Server get operation completed");
@@ -215,16 +198,13 @@ impl KvStore for ServerKv {
                 }
                 _ => {
                     let error_msg = response.text().await.unwrap_or_default();
-                    return Err(Box::new(GetError::ServerError(error_msg)));
+                    return Err(ServerError::General(error_msg).into());
                 }
             }
         }
     }
 
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    async fn exists(&self, arid: &ARID) -> Result<bool> {
         // Use a short timeout for exists check (1 second), no verbose
         Ok(self.get(arid, Some(1), false).await?.is_some())
     }

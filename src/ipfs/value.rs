@@ -3,13 +3,13 @@ use std::io::Cursor;
 use futures_util::TryStreamExt;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient};
 
-use super::error::{GetError, PutError};
+use super::error::Error;
 
 /// Add (upload) bytes to IPFS and return the CID.
 pub async fn add_bytes(
     client: &IpfsClient,
     bytes: Vec<u8>,
-) -> Result<String, PutError> {
+) -> Result<String, Error> {
     let add_res = client.add(Cursor::new(bytes)).await?;
     Ok(add_res.hash)
 }
@@ -18,7 +18,7 @@ pub async fn add_bytes(
 pub async fn cat_bytes(
     client: &IpfsClient,
     cid: &str,
-) -> Result<Vec<u8>, GetError> {
+) -> Result<Vec<u8>, Error> {
     let mut stream = client.cat(cid);
     let mut result = Vec::new();
     while let Some(chunk) = stream.try_next().await? {
@@ -32,7 +32,7 @@ pub async fn pin_cid(
     client: &IpfsClient,
     cid: &str,
     recursive: bool,
-) -> Result<(), PutError> {
+) -> Result<(), Error> {
     client.pin_add(cid, recursive).await?;
     Ok(())
 }

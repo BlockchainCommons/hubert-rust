@@ -4,8 +4,8 @@ use bc_ur::UREncodable;
 use dcbor::CBOREncodable;
 use mainline::{Dht, MutableItem, SigningKey};
 
-use super::error::{GetError, PutError};
-use crate::{KvStore, arid_derivation::derive_mainline_key};
+use super::error::Error as MainlineError;
+use crate::{Error, Result, KvStore, arid_derivation::derive_mainline_key};
 
 /// Mainline DHT-backed key-value store using ARID-based addressing.
 ///
@@ -62,8 +62,8 @@ pub struct MainlineDhtKv {
 
 impl MainlineDhtKv {
     /// Create a new Mainline DHT KV store with default settings.
-    pub async fn new() -> Result<Self, PutError> {
-        let dht = Dht::client()?.as_async();
+    pub async fn new() -> Result<Self> {
+        let dht = Dht::client().map_err(MainlineError::from)?.as_async();
 
         // Wait for bootstrap
         dht.bootstrapped().await;
@@ -118,12 +118,8 @@ impl KvStore for MainlineDhtKv {
         envelope: &Envelope,
         ttl_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.put_impl(arid, envelope, ttl_seconds, verbose)
-            .await
-            .map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })
+    ) -> Result<String> {
+        self.put_impl(arid, envelope, ttl_seconds, verbose).await
     }
 
     async fn get(
@@ -131,23 +127,13 @@ impl KvStore for MainlineDhtKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<Option<Envelope>> {
         // Polls DHT with specified timeout
-        self.get_impl(arid, timeout_seconds, verbose)
-            .await
-            .map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.get_impl(arid, timeout_seconds, verbose).await
     }
 
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        self.exists_impl(arid).await.map_err(|e| {
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })
+    async fn exists(&self, arid: &ARID) -> Result<bool> {
+        self.exists_impl(arid).await
     }
 }
 
@@ -159,7 +145,7 @@ impl MainlineDhtKv {
         envelope: &Envelope,
         _ttl_seconds: Option<u64>, // Ignored - DHT has no TTL support
         verbose: bool,
-    ) -> Result<String, PutError> {
+    ) -> Result<String> {
         use crate::logging::verbose_println;
 
         if verbose {
@@ -171,7 +157,9 @@ impl MainlineDhtKv {
 
         // Check size
         if bytes.len() > self.max_value_size {
-            return Err(PutError::ValueTooLarge { size: bytes.len() });
+            return Err(MainlineError::ValueTooLarge {
+                size: bytes.len(),
+            }.into());
         }
 
         if verbose {
@@ -196,7 +184,7 @@ impl MainlineDhtKv {
             .await
             .is_some()
         {
-            return Err(PutError::AlreadyExists { arid: arid.ur_string() });
+            return Err(Error::AlreadyExists { arid: arid.ur_string() });
         }
 
         // Create mutable item with seq=1 (first write)
@@ -209,7 +197,7 @@ impl MainlineDhtKv {
         if verbose {
             verbose_println("Putting value to DHT");
         }
-        self.dht.put_mutable(item, None).await?;
+        self.dht.put_mutable(item, None).await.map_err(MainlineError::from)?;
 
         if verbose {
             verbose_println("Mainline DHT put operation completed");
@@ -224,7 +212,7 @@ impl MainlineDhtKv {
         arid: &ARID,
         timeout_seconds: Option<u64>,
         verbose: bool,
-    ) -> Result<Option<Envelope>, GetError> {
+    ) -> Result<Option<Envelope>> {
         use tokio::time::{Duration, Instant, sleep};
 
         use crate::logging::{
@@ -295,7 +283,7 @@ impl MainlineDhtKv {
     }
 
     /// Internal exists implementation with typed errors.
-    async fn exists_impl(&self, arid: &ARID) -> Result<bool, GetError> {
+    async fn exists_impl(&self, arid: &ARID) -> Result<bool> {
         let signing_key = Self::derive_signing_key(arid);
         let pubkey = signing_key.verifying_key().to_bytes();
         let salt_opt = self.salt.as_deref();

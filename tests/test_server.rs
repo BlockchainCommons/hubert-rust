@@ -3,19 +3,19 @@ use bc_components::ARID;
 use bc_envelope::Envelope;
 use hubert::{
     KvStore,
-    server::{Server, ServerConfig, ServerKv},
+    server::{Server, ServerConfig, ServerKvClient},
 };
 use tokio::time::{Duration, sleep};
 
 /// Test basic put/get roundtrip with in-process server
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_put_get_roundtrip() -> Result<()> {
     // Register tags for UR parsing
     bc_components::register_tags();
 
     // Start server in background
     let config = ServerConfig::default();
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
@@ -23,7 +23,8 @@ async fn test_server_put_get_roundtrip() -> Result<()> {
     sleep(Duration::from_millis(100)).await;
 
     // Create client
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     // Generate test data
     let arid = ARID::new();
@@ -52,18 +53,19 @@ async fn test_server_put_get_roundtrip() -> Result<()> {
 }
 
 /// Test write-once semantics (putting same ARID twice should fail)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_write_once() -> Result<()> {
     bc_components::register_tags();
 
     let config = ServerConfig { port: 45680, ..Default::default() };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new();
     let envelope1 = Envelope::new("First message");
@@ -83,18 +85,19 @@ async fn test_server_write_once() -> Result<()> {
 }
 
 /// Test getting non-existent ARID
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_get_nonexistent() -> Result<()> {
     bc_components::register_tags();
 
     let config = ServerConfig { port: 45681, ..Default::default() };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new();
     let retrieved = client
@@ -107,18 +110,19 @@ async fn test_server_get_nonexistent() -> Result<()> {
 }
 
 /// Test TTL expiration
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_ttl() -> Result<()> {
     bc_components::register_tags();
 
     let config = ServerConfig { port: 45682, ..Default::default() };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new();
     let envelope = Envelope::new("Message with TTL");
@@ -150,7 +154,7 @@ async fn test_server_ttl() -> Result<()> {
 }
 
 /// Test that None TTL uses max_ttl from config
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_default_ttl() -> Result<()> {
     bc_components::register_tags();
 
@@ -160,13 +164,14 @@ async fn test_server_default_ttl() -> Result<()> {
         max_ttl: 2, // 2 seconds
         verbose: false,
     };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new();
     let envelope = Envelope::new("Message with default TTL");
@@ -201,7 +206,7 @@ async fn test_server_default_ttl() -> Result<()> {
 }
 
 /// Test that TTL is clamped to max_ttl
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_ttl_clamping() -> Result<()> {
     bc_components::register_tags();
 
@@ -211,13 +216,14 @@ async fn test_server_ttl_clamping() -> Result<()> {
         max_ttl: 2, // 2 seconds max
         verbose: false,
     };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new();
     let envelope = Envelope::new("Message with clamped TTL");
@@ -252,20 +258,21 @@ async fn test_server_ttl_clamping() -> Result<()> {
 }
 
 /// Test get timeout polling behavior
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_server_get_timeout() -> Result<()> {
     use tokio::time::Instant;
 
     bc_components::register_tags();
 
     let config = ServerConfig { port: 45685, max_ttl: 86400, verbose: false };
-    let server = Server::new(config.clone());
+    let server = Server::new_memory(config.clone());
 
     tokio::spawn(async move { server.run().await });
 
     sleep(Duration::from_millis(100)).await;
 
-    let client = ServerKv::new(&format!("http://127.0.0.1:{}", config.port));
+    let client =
+        ServerKvClient::new(&format!("http://127.0.0.1:{}", config.port));
 
     let arid = ARID::new(); // ARID that doesn't exist
 

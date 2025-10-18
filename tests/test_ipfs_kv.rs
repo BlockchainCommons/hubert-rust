@@ -39,36 +39,42 @@ macro_rules! skip_if_no_ipfs {
 
 #[tokio::test]
 async fn ipfs_basic_roundtrip() {
+    bc_components::register_tags();
     let store = skip_if_no_ipfs!(setup().await);
     common::kv_tests::test_basic_roundtrip(&store).await;
 }
 
 #[tokio::test]
 async fn ipfs_write_once() {
+    bc_components::register_tags();
     let store = skip_if_no_ipfs!(setup().await);
     common::kv_tests::test_write_once(&store).await;
 }
 
 #[tokio::test]
 async fn ipfs_nonexistent_arid() {
+    bc_components::register_tags();
     let store = skip_if_no_ipfs!(setup().await);
     common::kv_tests::test_nonexistent_arid(&store).await;
 }
 
 #[tokio::test]
 async fn ipfs_multiple_arids() {
+    bc_components::register_tags();
     let store = skip_if_no_ipfs!(setup().await);
     common::kv_tests::test_multiple_arids(&store).await;
 }
 
 #[tokio::test]
 async fn ipfs_size_limit() {
+    bc_components::register_tags();
     let store = skip_if_no_ipfs!(setup().await);
     common::kv_tests::test_size_limit(&store, 10 * 1024 * 1024).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ipfs_concurrent_operations() {
+    bc_components::register_tags();
     if setup().await.is_none() {
         eprintln!(
             "⚠️  Skipping test: IPFS daemon not running at 127.0.0.1:5001"
