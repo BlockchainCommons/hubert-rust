@@ -1,6 +1,14 @@
-# Hubert: Secure Distributed Substrate for Multiparty Transactions
+# Blockchain Commons Hubert
 
-Hubert provides a distributed infrastructure for secure multiparty transactions, such as FROST threshold signature ceremonies, enabling participants to communicate bidirectionally with complete opacity to outsiders. By leveraging write-once distributed storage with cryptographic identifiers, Hubert creates a trustless coordination layer where parties can exchange encrypted messages without relying on centralized servers or exposing sensitive information to network observers.
+<!--Guidelines: https://github.com/BlockchainCommons/secure-template/wiki -->
+
+### _by [Wolf McNally](https://www.github.com/wolfmcnally) and [Christopher Allen](https://www.github.com/ChristopherA)_
+
+---
+
+## Introduction
+
+**Hubert** provides a distributed infrastructure for secure multiparty transactions, such as FROST threshold signature ceremonies, enabling participants to communicate bidirectionally with complete opacity to outsiders. By leveraging write-once distributed storage with cryptographic identifiers, Hubert creates a trustless coordination layer where parties can exchange encrypted messages without relying on centralized servers or exposing sensitive information to network observers.
 
 ## Primary Purpose
 
@@ -20,25 +28,57 @@ Hubert's main purpose is to facilitate **secure multiparty transactions** where:
 5. Network observers see only GSTP envelopes (encrypted subject, sealed recipient assertions)
 6. ARIDs are never exposed - shared privately via secure channels (Signal, QR codes, etc.)
 
+
 ## About the "Hubert" Name
 
-Ted Nelson’s Project Xanadu had its own playful jargon. The basic object that behaved like a “file” was called a **bert**—named after **Bertrand Russell**. And because geeks can’t resist wordplay, there was also an **ernie**, the metered unit of billing in the publishing system.
+Ted Nelson's Project Xanadu had its own playful jargon. The basic object that behaved like a "file" was called a **bert**—named after **Bertrand Russell**. And because geeks can't resist wordplay, there was also an **ernie**, the metered unit of billing in the publishing system.
 
-Mark S. Miller, one of Xanadu’s architects, later designed the **Club System** (early groundwork for his capability-security thinking), which modeled group permissions but still relied on identity-checked ACLs rather than pure capabilities. That historical thread matters because Hubert sits exactly where Xanadu’s ideas were pointing, but finishes the job with cryptography.
+Mark S. Miller, one of Xanadu's architects, later designed the **Club System** (early groundwork for his capability-security thinking), which modeled group permissions but still relied on identity-checked ACLs rather than pure capabilities. That historical thread matters because Hubert sits exactly where Xanadu's ideas were pointing, but finishes the job with cryptography.
 
-So: **Hubert** is the **hub of berts**. In Xanadu terms, it’s the rendezvous point where these file-like objects (and their successors) can meet, exchange sealed messages, and coordinate—without servers, accounts, or trusted intermediaries. It’s a deliberate nod to Nelson’s vocabulary and to the “clubs” lineage, reframed for an era where capability comes from math, not administrators.
+So: **Hubert** is the **hub of berts**. In Xanadu terms, it's the rendezvous point where these file-like objects (and their successors) can meet, exchange sealed messages, and coordinate—without servers, accounts, or trusted intermediaries. It's a deliberate nod to Nelson's vocabulary and to the "clubs" lineage, reframed for an era where capability comes from math, not administrators.
 
-There’s also a second layer to the name. Cryptography uses a stock cast—**Alice**, **Bob**, **Carol**, et al.—to illustrate protocols. **Hubert** joins that dramatis personae as the sturdy switchboard operator in the background: the dropbox, dead-drop, and message hub that keeps multiparty ceremonies moving while revealing nothing but ciphertext to the outside world.
+There's also a second layer to the name. Cryptography uses a stock cast—**Alice**, **Bob**, **Carol**, et al.—to illustrate protocols. **Hubert** joins that dramatis personae as the sturdy switchboard operator in the background: the dropbox, dead-drop, and message hub that keeps multiparty ceremonies moving while revealing nothing but ciphertext to the outside world.
+
+## Getting Started
+
+### As a Command-Line Tool
+
+Install `hubert` from source:
+
+```bash
+cd hubert
+cargo install --path .
+```
+
+See the [CLI Manual](./docs/CLIManual.md) for detailed usage instructions.
+
+### As a Rust Library
+
+Add Hubert to your `Cargo.toml`:
+
+```toml
+[dependencies]
+hubert = "0.1.0"
+bc-components = "^0.25.0"
+bc-envelope = "^0.34.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+See the [API Manual](./docs/APIManual.md) for detailed usage instructions.
+
 
 ## Key Capabilities
 
 ### 1. Write-Once Distributed Storage
 
-Hubert provides APIs for three storage backends, all using write-once semantics:
+Hubert provides APIs for four storage backends, all using write-once semantics:
 
 - **BitTorrent Mainline DHT**: Fast, lightweight, serverless (≤1 KB messages)
 - **IPFS**: Large capacity, content-addressed (up to 10 MB messages)
 - **Hybrid**: Automatic optimization by size, combining DHT speed with IPFS capacity
+- **Server**: Centralized storage for testing and controlled deployments (configurable size limits)
+
+The first three backends (DHT, IPFS, Hybrid) provide decentralized, trustless operation suitable for production use. The Server backend is designed for development, testing, and controlled environments where centralized coordination is acceptable.
 
 Write-once semantics eliminate race conditions and ensure message immutability—once published, content cannot be modified or deleted by anyone, providing strong integrity guarantees.
 
@@ -98,280 +138,6 @@ The Hybrid storage backend automatically optimizes for size:
 
 This enables applications to send compact control messages via DHT while supporting large payloads (key material, proofs, documents) via IPFS without changing code.
 
-## Benefits
-
-### For Application Developers
-
-- **Simple API**: Single interface for DHT, IPFS, or Hybrid storage
-- **No Server Infrastructure**: Leverage existing public networks
-- **Built-in Security**: GSTP integration handles encryption and authentication
-- **Flexible Message Size**: From tiny control messages to multi-megabyte payloads
-- **Language Agnostic**: Rust implementation with C FFI for cross-language use
-
-### For Protocol Designers
-
-- **Asynchronous by Default**: Participants don't need to be online simultaneously
-- **Censorship Resistant**: No central points of failure or control
-- **Privacy Preserving**: Network observers cannot read message content or graph structure
-  - ARIDs shared only via secure channels (never exposed to storage networks)
-  - Storage networks see only derived keys and encrypted GSTP envelopes
-  - Envelope structure reveals no participant information
-- **Replay Protection**: Write-once prevents message modification or replay
-- **Scalable**: Public DHT/IPFS networks handle millions of nodes
-
-### For End Users
-
-- **No Account Required**: No registration, authentication, or identity verification
-- **Cross-Platform**: Works anywhere BitTorrent DHT or IPFS is available
-- **Sovereign**: Users control their own keys and identifiers
-- **Auditable**: All messages cryptographically verifiable
-- **Cost-Free**: No fees for using public networks (may pin IPFS content locally)
-
-## Usage
-
-Hubert can be used both as a **Rust library** for building distributed applications and as a **command-line tool** for interactive storage operations.
-
-### As a Rust Library
-
-Add Hubert to your `Cargo.toml`:
-
-```toml
-[dependencies]
-hubert = "0.1.0"
-bc-components = "^0.25.0"
-bc-envelope = "^0.34.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-```
-
-#### Basic Example: Mainline DHT Storage
-
-```rust
-use bc_components::ARID;
-use bc_envelope::Envelope;
-use hubert::{KvStore, mainline::MainlineDhtKv};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a Mainline DHT store
-    let store = MainlineDhtKv::new().await?;
-
-    // Generate an ARID for this storage location
-    let arid = ARID::new();
-
-    // Create an envelope
-    let envelope = Envelope::new("Hello, Hubert!");
-
-    // Store the envelope (write-once)
-    store.put(&arid, &envelope).await?;
-
-    // Share the ARID with other parties via secure channel
-    // (Signal, QR code, GSTP message, etc.)
-    println!("ARID: {}", arid.ur_string());
-
-    // Retrieve the envelope
-    if let Some(retrieved) = store.get(&arid).await? {
-        println!("Retrieved: {}", retrieved);
-    }
-
-    Ok(())
-}
-```
-
-#### Example: IPFS Storage
-
-```rust
-use bc_components::ARID;
-use bc_envelope::Envelope;
-use hubert::{KvStore, ipfs::IpfsKv};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create an IPFS store (requires running Kubo daemon)
-    let store = IpfsKv::new("http://127.0.0.1:5001");
-
-    let arid = ARID::new();
-    let envelope = Envelope::new("Large data payload");
-
-    // Store using IPFS (supports up to 10 MB)
-    store.put(&arid, &envelope).await?;
-
-    // Retrieve
-    if let Some(retrieved) = store.get(&arid).await? {
-        println!("Retrieved from IPFS: {}", retrieved);
-    }
-
-    Ok(())
-}
-```
-
-#### KvStore Trait
-
-Both `MainlineDhtKv` and `IpfsKv` implement the `KvStore` trait:
-
-```rust
-use bc_components::ARID;
-use bc_envelope::Envelope;
-use hubert::KvStore;
-
-async fn store_envelope(
-    store: &impl KvStore,
-    arid: &ARID,
-    envelope: &Envelope,
-) -> Result<(), Box<dyn std::error::Error>> {
-    store.put(arid, envelope).await?;
-    Ok(())
-}
-```
-
-This allows you to write storage-backend-agnostic code and swap implementations as needed.
-
-#### Write-Once Semantics
-
-All storage backends enforce write-once semantics. Attempting to write to an existing ARID will fail:
-
-```rust
-use hubert::mainline::PutError;
-
-// First write succeeds
-store.put(&arid, &envelope1).await?;
-
-// Second write to same ARID fails
-match store.put(&arid, &envelope2).await {
-    Err(PutError::AlreadyExists { .. }) => {
-        println!("ARID already exists");
-    }
-    _ => {}
-}
-```
-
-#### Error Handling
-
-Each backend has specific error types:
-
-```rust
-use hubert::mainline::{PutError, GetError};
-
-match store.put(&arid, &envelope).await {
-    Ok(_) => println!("Stored successfully"),
-    Err(PutError::AlreadyExists { key }) => {
-        println!("Key {} already exists", key);
-    }
-    Err(PutError::ValueTooLarge { size }) => {
-        println!("Value too large: {} bytes", size);
-    }
-    Err(e) => println!("Error: {}", e),
-}
-```
-
-### As a Command-Line Tool
-
-Hubert includes a `hubert` CLI for storing and retrieving Gordian Envelopes using distributed storage backends.
-
-#### Installation
-
-```bash
-# From source
-cd hubert
-cargo install --path .
-
-# Or run directly
-cargo build --bin hubert
-./target/debug/hubert --help
-```
-
-#### Usage
-
-The CLI supports four commands:
-
-**Generate an ARID**
-
-```bash
-# Generate a new ARID for use as a storage key
-hubert generate arid
-```
-
-Example output: `ur:arid/hdcxjelehfmtuoosqzjypfgasbntjlsnihrhgepsdensolzmhgfyfzcptydeknatfmnloncmadva`
-
-**Check Backend Availability**
-
-```bash
-# Check if Mainline DHT is available (default)
-hubert check
-
-# Check if IPFS daemon is running
-hubert check --storage ipfs
-```
-
-**Store an Envelope**
-
-```bash
-# Store using Mainline DHT (default, ≤1 KB)
-hubert put <ur:arid> <ur:envelope>
-
-# Store using IPFS (up to 10 MB)
-hubert put --storage ipfs <ur:arid> <ur:envelope>
-```
-
-Example:
-```bash
-# Generate an ARID and envelope
-ARID=$(hubert generate arid)
-ENVELOPE=$(envelope subject type string "Hello, Hubert!")
-
-# Store the envelope
-hubert put "$ARID" "$ENVELOPE"
-```
-
-**Retrieve an Envelope**
-
-```bash
-# Retrieve using Mainline DHT (default)
-hubert get <ur:arid>
-
-# Retrieve using IPFS
-hubert get --storage ipfs <ur:arid>
-```
-
-The retrieved envelope is output in `ur:envelope` format.
-
-#### CLI Options
-
-- `--storage`, `-s`: Choose storage backend
-  - `mainline` (default): BitTorrent Mainline DHT (fast, ≤1 KB messages)
-  - `ipfs`: IPFS (large capacity, up to 10 MB messages)
-
-#### Requirements
-
-- **Mainline DHT**: No external daemon required
-- **IPFS**: Requires running Kubo daemon at `127.0.0.1:5001`
-
-## Architecture Overview
-
-```
-Application Layer
-├── FROST Signing Ceremony
-├── Distributed Key Generation
-├── Secure Voting
-└── Encrypted Messaging
-
-GSTP Layer (Gordian Sealed Transaction Protocol)
-├── Message Encryption (to recipients)
-├── Message Signing (by sender)
-├── Encrypted State Continuations
-└── Request/Response Pairing
-
-Hubert Storage Layer
-├── ARID-Based Addressing
-├── Write-Once Semantics
-├── Size-Based Routing (Hybrid)
-└── Backend Selection
-
-Storage Backends
-├── Mainline DHT (fast, ≤1 KB)
-├── IPFS (large, pinned)
-└── Hybrid (automatic)
-```
-
 ## Use Cases
 
 ### 1. FROST Threshold Signatures
@@ -414,78 +180,71 @@ Provide sovereign messaging infrastructure:
 - Recipient retrieves and decrypts message (using derived storage key)
 - No metadata exposed to network observers (only GSTP envelope structure visible)
 
-## Security Model
+## Version History
 
-**Threat Model:**
-- Network observers can see derived storage keys and GSTP envelope structure
-- Network observers see encrypted subject and `hasRecipient: SealedMessage` assertions
-- Network observers cannot see ARIDs (stretched via HKDF to derive storage keys)
-- Network observers cannot decrypt messages or determine recipients
-- Storage networks cannot modify published messages (write-once)
-- Only intended recipients can decrypt message content
-- Only ARID creator can publish at that ARID (enforced by key derivation)
+### 0.1.0 - October 18, 2025
 
-**Trust Assumptions:**
-- Public DHT/IPFS networks are available and honest-majority
-- Cryptographic primitives (ed25519, HKDF, AES-GCM) are secure
-- Participants protect their private keys and ARIDs
-- ARID distribution happens over secure channels (GSTP, Signal, QR codes)
+- Initial release.
 
-**Security Properties:**
-- **Confidentiality**: End-to-end encryption via GSTP; ARIDs never exposed publicly
-- **Integrity**: Cryptographic signatures and write-once storage
-- **Authentication**: Sender signatures verified by recipients
-- **Availability**: Distributed storage resilient to node failures
-- **Privacy**: Network metadata reveals only GSTP envelope structure, not content or ARIDs
+## Status - Community Review
 
-## Getting Started
+Hubert is currently in the community review phase and should not be used for production tasks until it has had further testing and auditing.
 
-```rust
-use hubert::prelude::*;
-use bc_components::ARID;
-use gstp::prelude::*;
+See [Blockchain Commons' Development Phases](https://github.com/BlockchainCommons/Community/blob/master/release-path.md).
 
-// Choose storage backend
-let hybrid_kv = HybridKv::new(dht, ipfs);
+## Financial Support
 
-// Create GSTP message
-let request_arid = ARID::new();
-let response_arid = ARID::new();
+Hubert is a project of [Blockchain Commons](https://www.blockchaincommons.com/). We are proudly a "not-for-profit" social benefit corporation committed to open source & open development. Our work is funded entirely by donations and collaborative partnerships with people like you. Every contribution will be spent on building open tools, technologies, and techniques that sustain and advance blockchain and internet security infrastructure and promote an open web.
 
-let sealed_request = SealedRequest::new(function, request_arid, sender_xid)
-    .with_parameter("response_arid", response_arid)
-    .with_parameter("data", payload)
-    .seal(vec![&recipient_xid], sender_keys)?;
-
-// Store encrypted request
-hybrid_kv.put(&request_arid, &sealed_request.into(), options).await?;
-
-// Share request_arid with recipient via secure channel (Signal, QR code, etc.)
-// ARID is never exposed to storage network - only derived key is visible
-
-// Recipient retrieves, decrypts, processes, and publishes response at response_arid
-
-// Retrieve encrypted response
-if let Some(envelope) = hybrid_kv.get(&response_arid, options).await? {
-    let sealed_response = SealedResponse::try_from(envelope)?;
-    let response = sealed_response.unseal(sender_keys)?;
-    // Process response
-}
-```
-
-## Project Status
-
-Hubert is currently in the design and specification phase. This document reflects the planned architecture and capabilities. Implementation is forthcoming.
-
-See `AGENTS.md` for detailed technical specifications, API designs, and implementation plans.
+To financially support further development of Hubert and other projects, please consider becoming a Patron of Blockchain Commons through ongoing monthly patronage as a [GitHub Sponsor](https://github.com/sponsors/BlockchainCommons). You can also support Blockchain Commons with bitcoins at our [BTCPay Server](https://btcpay.blockchaincommons.com/).
 
 ## Contributing
 
-Hubert is part of [Blockchain Commons](https://www.blockchaincommons.com/)' suite of technologies for secure, decentralized systems. We welcome contributions, feedback, and collaboration.
+We encourage public contributions through issues and pull requests! Please review [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our development process. All contributions to this repository require a GPG signed [Contributor License Agreement](./CLA.md).
 
-## License
+### Discussions
 
-Licensed under the BSD-2-Clause Plus Patent License.
+The best place to talk about Blockchain Commons and its projects is in our GitHub Discussions areas.
+
+[**Gordian Developer Community**](https://github.com/BlockchainCommons/Gordian-Developer-Community/discussions). For standards and open-source developers who want to talk about interoperable wallet specifications, please use the Discussions area of the [Gordian Developer Community repo](https://github.com/BlockchainCommons/Gordian-Developer-Community/discussions). This is where you talk about Gordian specifications such as [Gordian Envelope](https://github.com/BlockchainCommons/Gordian/tree/master/Envelope#articles), [bc-shamir](https://github.com/BlockchainCommons/bc-shamir), [Sharded Secret Key Reconstruction](https://github.com/BlockchainCommons/bc-sskr), and [bc-ur](https://github.com/BlockchainCommons/bc-ur) as well as the larger [Gordian Architecture](https://github.com/BlockchainCommons/Gordian/blob/master/Docs/Overview-Architecture.md), its [Principles](https://github.com/BlockchainCommons/Gordian#gordian-principles) of independence, privacy, resilience, and openness, and its macro-architectural ideas such as functional partition (including airgapping, the original name of this community).
+
+[**Gordian User Community**](https://github.com/BlockchainCommons/Gordian/discussions). For users of the Gordian reference apps, including [Gordian Coordinator](https://github.com/BlockchainCommons/iOS-GordianCoordinator), [Gordian Seed Tool](https://github.com/BlockchainCommons/GordianSeedTool-iOS), [Gordian Server](https://github.com/BlockchainCommons/GordianServer-macOS), [Gordian Wallet](https://github.com/BlockchainCommons/GordianWallet-iOS), and [SpotBit](https://github.com/BlockchainCommons/spotbit) as well as our whole series of [CLI apps](https://github.com/BlockchainCommons/Gordian/blob/master/Docs/Overview-Apps.md#cli-apps). This is a place to talk about bug reports and feature requests as well as to explore how our reference apps embody the [Gordian Principles](https://github.com/BlockchainCommons/Gordian#gordian-principles).
+
+[**Blockchain Commons Discussions**](https://github.com/BlockchainCommons/Community/discussions). For developers, interns, and patrons of Blockchain Commons, please use the discussions area of the [Community repo](https://github.com/BlockchainCommons/Community) to talk about general Blockchain Commons issues, the intern program, or topics other than those covered by the [Gordian Developer Community](https://github.com/BlockchainCommons/Gordian-Developer-Community/discussions) or the
+[Gordian User Community](https://github.com/BlockchainCommons/Gordian/discussions).
+
+### Other Questions & Problems
+
+As an open-source, open-development community, Blockchain Commons does not have the resources to provide direct support of our projects. Please consider the discussions area as a locale where you might get answers to questions. Alternatively, please use this repository's [issues](./issues) feature. Unfortunately, we can not make any promises on response time.
+
+If your company requires support to use our projects, please feel free to contact us directly about options. We may be able to offer you a contract for support from one of our contributors, or we might be able to point you to another entity who can offer the contractual support that you need.
+
+### Credits
+
+The following people directly contributed to this repository. You can add your name here by getting involved. The first step is learning how to contribute from our [CONTRIBUTING.md](./CONTRIBUTING.md) documentation.
+
+| Name              | Role                     | Github                                           | Email                                 | GPG Fingerprint                                    |
+| ----------------- | ------------------------ | ------------------------------------------------ | ------------------------------------- | -------------------------------------------------- |
+| Christopher Allen | Principal Architect      | [@ChristopherA](https://github.com/ChristopherA) | \<ChristopherA@LifeWithAlacrity.com\> | FDFE 14A5 4ECB 30FC 5D22  74EF F8D3 6C91 3574 05ED |
+| Wolf McNally      | Lead Researcher/Engineer | [@WolfMcNally](https://github.com/wolfmcnally)   | \<Wolf@WolfMcNally.com\>              | 9436 52EE 3844 1760 C3DC  3536 4B6C 2FCF 8947 80AE |
+
+## Responsible Disclosure
+
+We want to keep all of our software safe for everyone. If you have discovered a security vulnerability, we appreciate your help in disclosing it to us in a responsible manner. We are unfortunately not able to offer bug bounties at this time.
+
+We do ask that you offer us good faith and use best efforts not to leak information or harm any user, their data, or our developer community. Please give us a reasonable amount of time to fix the issue before you publish it. Do not defraud our users or us in the process of discovery. We promise not to bring legal action against researchers who point out a problem provided they do their best to follow the these guidelines.
+
+### Reporting a Vulnerability
+
+Please report suspected security vulnerabilities in private via email to ChristopherA@BlockchainCommons.com (do not use this email for support). Please do NOT create publicly viewable issues for suspected security vulnerabilities.
+
+The following keys may be used to communicate sensitive information to developers:
+
+| Name              | Fingerprint                                        |
+| ----------------- | -------------------------------------------------- |
+| Christopher Allen | FDFE 14A5 4ECB 30FC 5D22  74EF F8D3 6C91 3574 05ED |
+
+You can import a key by running the following command with that individual's fingerprint: `gpg --recv-keys "<fingerprint>"` Ensure that you put quotes around fingerprints that contain spaces.
 
 ## Related Projects
 

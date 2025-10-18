@@ -2,6 +2,21 @@
 name = "hubert"
 version = "0.1.0"
 edition = "2024"
+description = "Hubert Command Line Tool."
+authors = ["Blockchain Commons"]
+repository = "https://github.com/BlockchainCommons/bc-hubert-rust"
+readme = "README.md"
+license = "BSD-2-Clause-Patent"
+documentation = "https://docs.rs/bc-hubert"
+keywords = [
+    "distributed",
+    "coordination",
+    "FROST",
+] # Up to five
+categories = [
+    "network-programming",
+    "command-line-utilities",
+] # https://crates.io/category_slugs
 
 [[bin]]
 name = "hubert"

@@ -77,7 +77,7 @@ hubert --help
 │ Usage: hubert [OPTIONS] <COMMAND>
 │
 │ Commands:
-│   generate  Generate a new ARID
+│   generate  Generate a new ARID or example Envelope
 │   put       Store an envelope at an ARID
 │   get       Retrieve an envelope by ARID
 │   check     Check if storage backend is available
@@ -222,7 +222,7 @@ Create a new ARID for use as a storage key:
 ARID=$(hubert generate arid)
 echo $ARID
 
-│ ur:arid/hdcxwzendlkofxcygymkfyjpjynnaawpvlmugugwamntkbguaehkgrwyzmjzgwrstlrphycmprsn
+│ ur:arid/hdcxiedwnbzooxpdihcmfykpvodagrmdjsidrespnbjeemfdgmdnesgeiaeocxprftbboxcsfsks
 ```
 
 ### Creating an Envelope
@@ -232,7 +232,7 @@ For testing, you can generate a test envelope with random data:
 ```
 hubert generate envelope 20 # Number of random bytes
 
-│ ur:envelope/tpsoghtlrelfasknehndrehpvolrzmdyfdndpmkgdrgrrkdkpdhgmn
+│ ur:envelope/tpsoghdldkjswyksidgadskggdsaflrfvlylrpzoseetiolkutdmlf
 ```
 
 Or create a real envelope using the `envelope` CLI tool (from bc-envelope-cli):
@@ -240,8 +240,10 @@ Or create a real envelope using the `envelope` CLI tool (from bc-envelope-cli):
 ```
 ENVELOPE=$(envelope subject type string 'Hello, Hubert')
 echo $ENVELOPE
+envelope format $ENVELOPE
 
 │ ur:envelope/tpsojnfdihjzjzjldwcxfdkpidihjpjyoynyghtd
+│ "Hello, Hubert"
 ```
 
 ### Storing Data (Put)
@@ -257,7 +259,7 @@ hubert put $ARID $ENVELOPE
 ```
 hubert put $ARID $ENVELOPE
 
-│ Error: ur:arid/hdcxwzendlkofxcygymkfyjpjynnaawpvlmugugwamntkbguaehkgrwyzmjzgwrstlrphycmprsn already exists
+│ Error: ur:arid/hdcxiedwnbzooxpdihcmfykpvodagrmdjsidrespnbjeemfdgmdnesgeiaeocxprftbboxcsfsks already exists
 ```
 
 ### Retrieving Data (Get)
@@ -315,7 +317,7 @@ If a backend is unavailable, you'll see an error:
 ```
 hubert check --storage server --port 1234
 
-│ Error: ✗ Server is not available at 127.0.0.1:1234: error sending request for url (http://127.0.0.1:1234/health)│
+│ Error: ✗ Server is not available at 127.0.0.1:1234: error sending request for url (http://127.0.0.1:1234/health)
 ```
 
 ## Storage Backend Examples
@@ -333,7 +335,7 @@ ENVELOPE=$(envelope subject type string "DHT message")
 hubert put $ARID $ENVELOPE
 hubert get $ARID
 
-│ ur:envelope/tpsojkjyisinjkdpisjkisyaonwmdy
+│ ur:envelope/tpsojefyfdghcxjnihjkjkhsioihmusnlpsp
 ```
 
 **Note**: DHT operations may take 1-20 seconds as the client bootstraps into the network and propagates data.
@@ -357,7 +359,7 @@ ENVELOPE=$(envelope subject type string "IPFS message")
 hubert put --storage ipfs $ARID $ENVELOPE
 hubert get --storage ipfs $ARID
 
-│ ur:envelope/tpsojkjyisinjkdpiojkisyatbhdax
+│ ur:envelope/tpsojzgagdfggucxjnihjkjkhsioihzmeslohk
 ```
 
 **IPFS Pinning**: By default, content is not pinned. Use `--pin` to ensure persistence. This example uses the `--verbose` flag to show detailed output:
@@ -366,15 +368,32 @@ hubert get --storage ipfs $ARID
 ARID=$(hubert generate arid)
 hubert put --storage ipfs --pin --verbose $ARID $ENVELOPE
 
-│ [2025-10-17T10:18:11.940Z] Starting IPFS put operation
-│ [2025-10-17T10:18:11.940Z] Envelope size: 17 bytes
-│ [2025-10-17T10:18:11.940Z] Getting or creating IPNS key
-│ [2025-10-17T10:18:11.983Z] Adding content to IPFS
-│ [2025-10-17T10:18:12.021Z] Content CID: QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT
-│ [2025-10-17T10:18:12.021Z] Pinning content
-│ [2025-10-17T10:18:12.053Z] Publishing to IPNS (write-once check)
-│ [2025-10-17T10:18:46.384Z] IPFS put operation completed
-│ [2025-10-17T10:18:46.384Z] ✓ Stored envelope at ARID
+│ [2025-10-18T10:02:03.272Z] Starting IPFS put operation
+│ [2025-10-18T10:02:03.273Z] Envelope size: 17 bytes
+│ [2025-10-18T10:02:03.273Z] Getting or creating IPNS key
+│ [2025-10-18T10:02:03.325Z] Adding content to IPFS
+│ [2025-10-18T10:02:03.366Z] Content CID: QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT
+│ [2025-10-18T10:02:03.366Z] Pinning content
+│ [2025-10-18T10:02:03.396Z] Publishing to IPNS (write-once check)
+│ [2025-10-18T10:02:38.998Z] IPFS put operation completed
+│ [2025-10-18T10:02:38.998Z] ✓ Stored envelope at ARID
+│ CID: QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT
+```
+
+See pinned content:
+
+```
+ipfs pin ls
+
+│ QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT recursive
+```
+
+Unpin the content:
+
+```
+ipfs pin rm QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT
+
+│ unpinned QmPUKGjPUbJQVb5PonRh21EtaNJ19UHXUNqoFmSovT4YpT
 ```
 
 ### Using Hybrid Storage
@@ -387,15 +406,15 @@ SMALL_MSG=$(envelope subject type string "Small")
 ARID_SMALL=$(hubert generate arid)
 hubert put --storage hybrid --verbose $ARID_SMALL $SMALL_MSG
 
-│ [2025-10-17T10:31:11.622Z] Storing envelope in DHT (size ≤ 1000 bytes)
-│ [2025-10-17T10:31:11.623Z] Starting Mainline DHT put operation
-│ [2025-10-17T10:31:11.623Z] Envelope size: 10 bytes
-│ [2025-10-17T10:31:11.623Z] Deriving DHT signing key from ARID
-│ [2025-10-17T10:31:11.624Z] Checking for existing value (write-once check)
-│ [2025-10-17T10:31:14.950Z] Creating mutable DHT item
-│ [2025-10-17T10:31:14.951Z] Putting value to DHT
-│ [2025-10-17T10:31:17.062Z] Mainline DHT put operation completed
-│ [2025-10-17T10:31:17.063Z] ✓ Stored envelope at ARID
+│ [2025-10-18T10:08:31.138Z] Storing envelope in DHT (size ≤ 1000 bytes)
+│ [2025-10-18T10:08:31.138Z] Starting Mainline DHT put operation
+│ [2025-10-18T10:08:31.138Z] Envelope size: 10 bytes
+│ [2025-10-18T10:08:31.138Z] Deriving DHT signing key from ARID
+│ [2025-10-18T10:08:31.139Z] Checking for existing value (write-once check)
+│ [2025-10-18T10:08:34.174Z] Creating mutable DHT item
+│ [2025-10-18T10:08:34.175Z] Putting value to DHT
+│ [2025-10-18T10:08:36.339Z] Mainline DHT put operation completed
+│ [2025-10-18T10:08:36.339Z] ✓ Stored envelope at ARID
 ```
 
 ```
@@ -404,24 +423,24 @@ LARGE_MSG=$(hubert generate envelope 2000) # 2000 random bytes
 ARID_LARGE=$(hubert generate arid)
 hubert put --storage hybrid --verbose $ARID_LARGE $LARGE_MSG
 
-│ [2025-10-17T10:31:47.880Z] Envelope too large for DHT, using IPFS indirection
-│ [2025-10-17T10:31:47.880Z] Storing actual envelope in IPFS with reference ARID: ur:arid/hdcxjkgrnscpftlkwzeegurfttdrbnreckpmlnknrygewtimmnolghwtnslurhmobkhphefxsepr
-│ [2025-10-17T10:31:47.881Z] Starting IPFS put operation
-│ [2025-10-17T10:31:47.881Z] Envelope size: 2007 bytes
-│ [2025-10-17T10:31:47.881Z] Getting or creating IPNS key
-│ [2025-10-17T10:31:47.957Z] Adding content to IPFS
-│ [2025-10-17T10:31:47.992Z] Content CID: QmPhKbUrdNNZinq3FF8XwXYcVznb7xJgQx9RU3gZ6TnJV9
-│ [2025-10-17T10:31:47.992Z] Publishing to IPNS (write-once check)
-│ [2025-10-17T10:32:21.350Z] IPFS put operation completed
-│ [2025-10-17T10:32:21.354Z] Storing reference envelope in DHT at original ARID
-│ [2025-10-17T10:32:21.354Z] Starting Mainline DHT put operation
-│ [2025-10-17T10:32:21.355Z] Envelope size: 72 bytes
-│ [2025-10-17T10:32:21.355Z] Deriving DHT signing key from ARID
-│ [2025-10-17T10:32:21.356Z] Checking for existing value (write-once check)
-│ [2025-10-17T10:32:24.324Z] Creating mutable DHT item
-│ [2025-10-17T10:32:24.324Z] Putting value to DHT
-│ [2025-10-17T10:32:26.463Z] Mainline DHT put operation completed
-│ [2025-10-17T10:32:26.464Z] ✓ Stored envelope at ARID
+│ [2025-10-18T10:08:57.140Z] Envelope too large for DHT, using IPFS indirection
+│ [2025-10-18T10:08:57.140Z] Storing actual envelope in IPFS with reference ARID: ur:arid/hdcxgskpendlfrlesrcssbbkrtmewnzmrdbyeorsvstpdyfhcnhfmklessrelettldgalfjtcmny
+│ [2025-10-18T10:08:57.140Z] Starting IPFS put operation
+│ [2025-10-18T10:08:57.140Z] Envelope size: 2007 bytes
+│ [2025-10-18T10:08:57.140Z] Getting or creating IPNS key
+│ [2025-10-18T10:08:57.208Z] Adding content to IPFS
+│ [2025-10-18T10:08:57.243Z] Content CID: QmZmKaSWuowBPsWEEp5JsZ7tkPwmjhAtyEpvqrvKhsNN3a
+│ [2025-10-18T10:08:57.243Z] Publishing to IPNS (write-once check)
+│ [2025-10-18T10:09:28.157Z] IPFS put operation completed
+│ [2025-10-18T10:09:28.160Z] Storing reference envelope in DHT at original ARID
+│ [2025-10-18T10:09:28.160Z] Starting Mainline DHT put operation
+│ [2025-10-18T10:09:28.161Z] Envelope size: 72 bytes
+│ [2025-10-18T10:09:28.161Z] Deriving DHT signing key from ARID
+│ [2025-10-18T10:09:28.161Z] Checking for existing value (write-once check)
+│ [2025-10-18T10:09:30.978Z] Creating mutable DHT item
+│ [2025-10-18T10:09:30.978Z] Putting value to DHT
+│ [2025-10-18T10:09:32.524Z] Mainline DHT put operation completed
+│ [2025-10-18T10:09:32.524Z] ✓ Stored envelope at ARID
 ```
 
 Retrieval is transparent - Hybrid automatically determines the correct backend:
@@ -431,7 +450,7 @@ hubert get --storage hybrid $ARID_SMALL
 hubert get --storage hybrid $ARID_LARGE
 
 │ ur:envelope/tpsoihgujnhsjzjzsrrtsskg
-│ ur:envelope/tpsohkattiecfzfdswresrtbvdwsetcyveguwdolgdvdamgsdnv...
+│ ur:envelope/tpsohkattifzfppdlrrhvybnflhdjoptmtzshtwfotpdfltkgreerylddsotnlkknlsooy...
 ```
 
 ### Using Hubert Server
@@ -477,10 +496,10 @@ Enable verbose logging to see detailed operation information:
 ARID=$(hubert generate arid)
 hubert --storage server --verbose put $ARID $ENVELOPE
 
-│ [2025-10-17T10:37:32.314Z] Starting server put operation
-│ [2025-10-17T10:37:32.315Z] Sending PUT request to server
-│ [2025-10-17T10:37:32.329Z] Server put operation completed
-│ [2025-10-17T10:37:32.329Z] ✓ Stored envelope at ARID
+│ [2025-10-18T10:11:26.160Z] Starting server put operation
+│ [2025-10-18T10:11:26.161Z] Sending PUT request to server
+│ [2025-10-18T10:11:26.166Z] Server put operation completed
+│ [2025-10-18T10:11:26.166Z] ✓ Stored envelope at ARID
 ```
 
 ### Timeouts
