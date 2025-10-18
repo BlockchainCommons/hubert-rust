@@ -56,9 +56,15 @@ Hubert is a secure distributed substrate for multiparty transactions. It provide
 
 ## Installation
 
-Build and install `hubert` from the repository:
+Install from crates.io:
 
+```bash
+cargo install hubert
 ```
+
+Or build and install from source:
+
+```bash
 cd /path/to/hubert
 cargo install --path .
 ```

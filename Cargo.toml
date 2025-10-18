@@ -2,17 +2,13 @@
 name = "hubert"
 version = "0.1.0"
 edition = "2024"
-description = "Hubert Command Line Tool."
+description = "Secure distributed substrate for multiparty transactions using write-once key-value storage with ARID-based addressing"
 authors = ["Blockchain Commons"]
 repository = "https://github.com/BlockchainCommons/bc-hubert-rust"
 readme = "README.md"
 license = "BSD-2-Clause-Patent"
-documentation = "https://docs.rs/bc-hubert"
-keywords = [
-    "distributed",
-    "coordination",
-    "FROST",
-] # Up to five
+documentation = "https://docs.rs/hubert"
+keywords = ["distributed", "coordination", "FROST", "ARID", "DHT"] # Up to five
 categories = [
     "network-programming",
     "command-line-utilities",

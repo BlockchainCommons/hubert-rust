@@ -43,7 +43,13 @@ There's also a second layer to the name. Cryptography uses a stock cast—**Alic
 
 ### As a Command-Line Tool
 
-Install `hubert` from source:
+Install `hubert` from crates.io:
+
+```bash
+cargo install hubert
+```
+
+Or install from source:
 
 ```bash
 cd hubert
