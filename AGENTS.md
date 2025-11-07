@@ -56,8 +56,9 @@ Uses IPNS for write-once ARID-keyed envelopes:
 Combines DHT and IPFS with automatic size-based routing:
 
 - **Small envelopes (≤1000 bytes)**: Direct DHT storage
-- **Large envelopes (>1000 bytes)**: Reference envelope in DHT → actual envelope in IPFS
-- **Reference Envelope Format**:
+- **Large envelopes (>1000 bytes)**: Encrypted reference envelope in DHT → actual envelope in IPFS
+- **Reference Encryption**: Reference envelopes are encrypted with a key derived from the original ARID using HKDF, preventing exposure of the IPFS ARID in the DHT
+- **Reference Envelope Format** (before encryption):
   ```
   '' [
       'dereferenceVia': "ipfs",

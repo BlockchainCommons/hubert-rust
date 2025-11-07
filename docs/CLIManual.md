@@ -438,9 +438,10 @@ hubert put --storage hybrid --verbose $ARID_LARGE $LARGE_MSG
 │ [2025-10-18T10:08:57.243Z] Content CID: QmZmKaSWuowBPsWEEp5JsZ7tkPwmjhAtyEpvqrvKhsNN3a
 │ [2025-10-18T10:08:57.243Z] Publishing to IPNS (write-once check)
 │ [2025-10-18T10:09:28.157Z] IPFS put operation completed
-│ [2025-10-18T10:09:28.160Z] Storing reference envelope in DHT at original ARID
+│ [2025-10-18T10:09:28.160Z] Encrypted reference envelope to hide IPFS ARID
+│ [2025-10-18T10:09:28.160Z] Storing encrypted reference envelope in DHT at original ARID
 │ [2025-10-18T10:09:28.160Z] Starting Mainline DHT put operation
-│ [2025-10-18T10:09:28.161Z] Envelope size: 72 bytes
+│ [2025-10-18T10:09:28.161Z] Envelope size: 151 bytes
 │ [2025-10-18T10:09:28.161Z] Deriving DHT signing key from ARID
 │ [2025-10-18T10:09:28.161Z] Checking for existing value (write-once check)
 │ [2025-10-18T10:09:30.978Z] Creating mutable DHT item

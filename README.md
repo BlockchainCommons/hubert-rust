@@ -110,7 +110,7 @@ Hubert is designed to work with GSTP (Gordian Sealed Transaction Protocol) messa
 - **Stateless Operation**: Encrypted State Continuations eliminate server-side sessions
 - **Network Opacity**: Storage networks see only encrypted envelopes
 
-With GSTP integration, even storage indirection is secured—when Hybrid storage uses references, the references themselves are encrypted to the same recipients as the payload.
+Hubert's storage layer is designed to work with GSTP-encrypted payloads, ensuring end-to-end security for multiparty transactions.
 
 ### 4. Bidirectional Communication Pattern
 
@@ -138,11 +138,11 @@ This pattern supports complex multiparty protocols (threshold signatures, distri
 The Hybrid storage backend automatically optimizes for size:
 
 - **Small messages (≤1 KB)**: Stored directly in DHT for fast retrieval
-- **Large messages (>1 KB)**: Reference stored in DHT, actual content in IPFS
+- **Large messages (>1 KB)**: Reference stored in DHT (encrypted to hide IPFS ARID), actual content in IPFS
 - **Transparent indirection**: Applications use same API regardless of size
-- **Secure references**: With GSTP, even references are encrypted to recipients
+- **Reference encryption**: IPFS ARIDs hidden from DHT observers using ARID-derived encryption keys
 
-This enables applications to send compact control messages via DHT while supporting large payloads (key material, proofs, documents) via IPFS without changing code.
+This enables applications to send compact control messages via DHT while supporting large payloads (key material, proofs, documents) via IPFS without changing code. The reference envelope encryption is an internal security measure independent of application-layer GSTP encryption.
 
 ## Use Cases
 
