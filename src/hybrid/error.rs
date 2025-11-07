@@ -12,4 +12,7 @@ pub enum Error {
 
     #[error("No id assertion found in reference envelope")]
     NoIdAssertion,
+
+    #[error("Decrypted envelope is not a valid reference envelope")]
+    InvalidDecryptedReference,
 }

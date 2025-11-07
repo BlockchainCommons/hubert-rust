@@ -99,7 +99,10 @@ fn test_invalid_storage_backend() -> Result<()> {
 
 #[test]
 fn test_generate_help() -> Result<()> {
-    run_cli_contains(&["generate", "--help"], "Generate a new ARID or example Envelope")?;
+    run_cli_contains(
+        &["generate", "--help"],
+        "Generate a new ARID or example Envelope",
+    )?;
     run_cli_contains(&["generate", "--help"], "arid")?;
     Ok(())
 }

@@ -9,7 +9,7 @@ use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use tokio::time::sleep;
 
-use crate::{Error, Result, KvStore};
+use crate::{Error, KvStore, Result};
 
 /// In-memory key-value store for Gordian Envelopes.
 ///
@@ -33,10 +33,7 @@ impl MemoryKv {
     }
 
     /// Check if an ARID exists and is not expired.
-    fn check_exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool> {
+    fn check_exists(&self, arid: &ARID) -> Result<bool> {
         let storage = self.storage.read().unwrap();
 
         if let Some(entry) = storage.get(arid) {
@@ -183,10 +180,7 @@ impl KvStore for MemoryKv {
         }
     }
 
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool> {
+    async fn exists(&self, arid: &ARID) -> Result<bool> {
         self.check_exists(arid)
     }
 }

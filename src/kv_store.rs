@@ -210,8 +210,5 @@ pub trait KvStore: Send + Sync {
     /// }
     /// # }
     /// ```
-    async fn exists(
-        &self,
-        arid: &ARID,
-    ) -> Result<bool>;
+    async fn exists(&self, arid: &ARID) -> Result<bool>;
 }

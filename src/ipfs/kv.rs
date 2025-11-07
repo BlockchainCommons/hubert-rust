@@ -12,9 +12,7 @@ use super::{
     error::Error as IpfsError,
     value::{add_bytes, cat_bytes, pin_cid},
 };
-use crate::{
-    Error, Result, KvStore, arid_derivation::derive_ipfs_key_name,
-};
+use crate::{Error, KvStore, Result, arid_derivation::derive_ipfs_key_name};
 
 /// IPFS-backed key-value store using IPNS for ARID-based addressing.
 ///
@@ -123,8 +121,11 @@ impl IpfsKv {
         }
 
         // Generate new key
-        let key_info =
-            self.client.key_gen(&key_name, KeyType::Ed25519, 0).await.map_err(IpfsError::from)?;
+        let key_info = self
+            .client
+            .key_gen(&key_name, KeyType::Ed25519, 0)
+            .await
+            .map_err(IpfsError::from)?;
 
         let info = KeyInfo { peer_id: key_info.id };
 
@@ -220,7 +221,10 @@ impl IpfsKv {
                     if let Some(cid) = res.path.strip_prefix("/ipfs/") {
                         return Ok(Some(cid.to_string()));
                     } else {
-                        return Err(IpfsError::UnexpectedIpnsPathFormat(res.path).into());
+                        return Err(IpfsError::UnexpectedIpnsPathFormat(
+                            res.path,
+                        )
+                        .into());
                     }
                 }
                 Err(e) => {
@@ -297,9 +301,9 @@ impl IpfsKv {
 
         // Check size
         if bytes.len() > self.max_envelope_size {
-            return Err(IpfsError::EnvelopeTooLarge {
-                size: bytes.len(),
-            }.into());
+            return Err(
+                IpfsError::EnvelopeTooLarge { size: bytes.len() }.into()
+            );
         }
 
         if verbose {

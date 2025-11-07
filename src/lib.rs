@@ -9,4 +9,4 @@ pub mod server;
 
 pub use error::{Error, Result};
 pub use kv_store::KvStore;
-pub use server::{SqliteKv, MemoryKv};
+pub use server::{MemoryKv, SqliteKv};

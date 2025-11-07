@@ -5,7 +5,7 @@ use dcbor::CBOREncodable;
 use mainline::{Dht, MutableItem, SigningKey};
 
 use super::error::Error as MainlineError;
-use crate::{Error, Result, KvStore, arid_derivation::derive_mainline_key};
+use crate::{Error, KvStore, Result, arid_derivation::derive_mainline_key};
 
 /// Mainline DHT-backed key-value store using ARID-based addressing.
 ///
@@ -157,9 +157,9 @@ impl MainlineDhtKv {
 
         // Check size
         if bytes.len() > self.max_value_size {
-            return Err(MainlineError::ValueTooLarge {
-                size: bytes.len(),
-            }.into());
+            return Err(
+                MainlineError::ValueTooLarge { size: bytes.len() }.into()
+            );
         }
 
         if verbose {
@@ -197,7 +197,10 @@ impl MainlineDhtKv {
         if verbose {
             verbose_println("Putting value to DHT");
         }
-        self.dht.put_mutable(item, None).await.map_err(MainlineError::from)?;
+        self.dht
+            .put_mutable(item, None)
+            .await
+            .map_err(MainlineError::from)?;
 
         if verbose {
             verbose_println("Mainline DHT put operation completed");

@@ -71,9 +71,10 @@ enum Commands {
         #[arg(value_name = "ENVELOPE")]
         envelope: String,
 
-        /// Time-to-live in seconds (for --storage server or --storage ipfs/hybrid).
-        /// Server: controls data retention (default: 24 hours).
-        /// IPFS: controls IPNS record lifetime (default: 24 hours).
+        /// Time-to-live in seconds (for --storage server or --storage
+        /// ipfs/hybrid). Server: controls data retention (default: 24
+        /// hours). IPFS: controls IPNS record lifetime (default: 24
+        /// hours).
         #[arg(long)]
         ttl: Option<u64>,
 

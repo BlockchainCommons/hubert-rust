@@ -16,14 +16,10 @@ pub enum ServerKv {
 
 impl ServerKv {
     /// Create a new in-memory server KV store.
-    pub fn memory() -> Self {
-        Self::Memory(MemoryKv::new())
-    }
+    pub fn memory() -> Self { Self::Memory(MemoryKv::new()) }
 
     /// Create a new SQLite-backed server KV store.
-    pub fn sqlite(store: SqliteKv) -> Self {
-        Self::Sqlite(store)
-    }
+    pub fn sqlite(store: SqliteKv) -> Self { Self::Sqlite(store) }
 
     /// Synchronously put an envelope into the store.
     ///

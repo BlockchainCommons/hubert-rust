@@ -102,7 +102,8 @@ pub fn is_reference_envelope(envelope: &Envelope) -> bool {
 /// # Returns
 ///
 /// - `Ok(ARID)` if the reference ARID was successfully extracted
-/// - `Err(HybridError)` if the envelope is not a reference or the ARID is invalid
+/// - `Err(HybridError)` if the envelope is not a reference or the ARID is
+///   invalid
 pub fn extract_reference_arid(envelope: &Envelope) -> Result<ARID, Error> {
     if !is_reference_envelope(envelope) {
         return Err(Error::NotReferenceEnvelope);

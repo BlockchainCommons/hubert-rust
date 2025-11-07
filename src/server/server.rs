@@ -1,6 +1,5 @@
 use std::{net::SocketAddr, time::Duration};
 
-use super::{ServerKv, SqliteKv};
 use axum::{
     Router,
     body::Bytes,
@@ -14,6 +13,7 @@ use bc_envelope::Envelope;
 use bc_ur::prelude::*;
 use tokio::net::TcpListener;
 
+use super::{ServerKv, SqliteKv};
 use crate::Result;
 
 /// Configuration for the Hubert server.
@@ -170,9 +170,7 @@ impl Server {
     }
 
     /// Get the port the server is configured to listen on.
-    pub fn port(&self) -> u16 {
-        self.config.port
-    }
+    pub fn port(&self) -> u16 { self.config.port }
 }
 
 /// Handle health check requests.

@@ -1,4 +1,4 @@
-use bc_components::ARID;
+use bc_components::{ARID, SymmetricKey};
 use bc_crypto::hkdf_hmac_sha256;
 
 /// Derive a deterministic key identifier from an ARID using a specific salt.
@@ -39,6 +39,29 @@ pub fn derive_ipfs_key_name(arid: &ARID) -> String {
 pub fn derive_mainline_key(arid: &ARID) -> String {
     const SALT: &[u8] = b"hubert-mainline-dht-v1";
     derive_key(SALT, arid, 20)
+}
+
+/// Derive a symmetric encryption key from an ARID for reference envelope
+/// encryption.
+///
+/// This key is used to encrypt reference envelopes stored in the DHT, ensuring
+/// that the IPFS ARID is never stored in plaintext in the Mainline DHT.
+///
+/// Uses HKDF-HMAC-SHA-256 with a domain-specific salt to derive a 32-byte key.
+///
+/// # Parameters
+///
+/// - `arid`: The ARID to derive the encryption key from
+///
+/// # Returns
+///
+/// A `SymmetricKey` that can be used to encrypt/decrypt reference envelopes
+pub fn derive_reference_encryption_key(arid: &ARID) -> SymmetricKey {
+    const SALT: &[u8] = b"hubert-reference-encryption-v1";
+    let key_bytes =
+        hkdf_hmac_sha256(SALT, arid.data(), SymmetricKey::SYMMETRIC_KEY_SIZE);
+    SymmetricKey::from_data_ref(key_bytes)
+        .expect("HKDF output is always 32 bytes")
 }
 
 #[cfg(test)]
