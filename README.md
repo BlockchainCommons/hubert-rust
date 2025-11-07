@@ -64,7 +64,7 @@ Add Hubert to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hubert = "0.1.0"
+hubert = "0.2.0"
 bc-components = "^0.25.0"
 bc-envelope = "^0.34.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
@@ -187,6 +187,14 @@ Provide sovereign messaging infrastructure:
 - No metadata exposed to network observers (only GSTP envelope structure visible)
 
 ## Version History
+
+### 0.2.0 - November 7, 2025
+
+- Encrypt hybrid layer reference envelopes to hide IPFS ARIDs from DHT observers.
+- Add ARID-derived encryption keys for reference envelope security.
+- Update documentation to reflect reference encryption behavior.
+- Fix tests.
+- Fix repo name.
 
 ### 0.1.0 - October 18, 2025
 
