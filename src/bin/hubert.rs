@@ -16,7 +16,7 @@ use hubert::{
     logging::verbose_println, mainline::MainlineDhtKv,
 };
 
-/// Hubert: Secure distributed key-value store for Gordian Envelopes
+/// Hubert: Distributed substrate for multiparty transactions
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {

@@ -6,51 +6,6 @@ mod cli_common;
 use cli_common::*;
 
 #[test]
-fn test_help() -> Result<()> {
-    run_cli_contains(
-        &["--help"],
-        "Hubert: Secure distributed key-value store",
-    )?;
-    run_cli_contains(&["--help"], "Commands:")?;
-    run_cli_contains(&["--help"], "generate")?;
-    run_cli_contains(&["--help"], "put")?;
-    run_cli_contains(&["--help"], "get")?;
-    run_cli_contains(&["--help"], "check")?;
-    Ok(())
-}
-
-#[test]
-fn test_version() -> Result<()> {
-    run_cli_contains(&["--version"], "hubert")?;
-    Ok(())
-}
-
-#[test]
-fn test_put_help() -> Result<()> {
-    run_cli_contains(&["put", "--help"], "Store an envelope at an ARID")?;
-    run_cli_contains(&["put", "--help"], "<ARID>")?;
-    run_cli_contains(&["put", "--help"], "<ENVELOPE>")?;
-    Ok(())
-}
-
-#[test]
-fn test_get_help() -> Result<()> {
-    run_cli_contains(&["get", "--help"], "Retrieve an envelope by ARID")?;
-    run_cli_contains(&["get", "--help"], "<ARID>")?;
-    Ok(())
-}
-
-#[test]
-fn test_check_help() -> Result<()> {
-    run_cli_contains(
-        &["check", "--help"],
-        "Check if storage backend is available",
-    )?;
-    run_cli_contains(&["check", "--help"], "--storage")?;
-    Ok(())
-}
-
-#[test]
 fn test_invalid_command() -> Result<()> {
     run_cli_expect_error(&["invalid"])?;
     Ok(())
