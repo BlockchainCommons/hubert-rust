@@ -59,3 +59,19 @@ pub fn run_cli_contains(args: &[&str], expected: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Run the hubert CLI and return output regardless of success/failure.
+/// Returns stdout if successful, stderr if failed.
+pub fn run_cli_allow_failure(args: &[&str]) -> String {
+    let output = Command::cargo_bin("hubert")
+        .unwrap()
+        .args(args)
+        .output()
+        .unwrap();
+
+    if output.status.success() {
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    } else {
+        String::from_utf8(output.stderr).unwrap().trim().to_string()
+    }
+}

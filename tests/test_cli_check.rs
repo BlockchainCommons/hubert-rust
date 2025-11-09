@@ -31,14 +31,25 @@ fn test_check_mainline_default() -> Result<()> {
 
 #[test]
 fn test_check_ipfs() -> Result<()> {
-    // This test will likely fail unless IPFS daemon is running
-    let output = run_cli(&["check", "--storage", "ipfs"])?;
-    assert!(
-        output.contains("IPFS is available")
-            || output.contains("not available"),
-        "Output should indicate IPFS availability status: {}",
-        output
-    );
+    // This test handles both success and failure cases (when IPFS daemon is not running)
+    let output = run_cli_allow_failure(&["check", "--storage", "ipfs"]);
+
+    if output.contains("IPFS is available") {
+        // IPFS daemon is running, test passes
+        println!("✓ IPFS daemon is running and available");
+    } else if output.contains("not available") {
+        // IPFS daemon is not running, test passes with warning
+        println!(
+            "⚠ Warning: IPFS daemon is not running - test passed but IPFS check failed"
+        );
+    } else {
+        // Unexpected output
+        panic!(
+            "Expected output to contain 'IPFS is available' or 'not available', but got: {}",
+            output
+        );
+    }
+
     Ok(())
 }
 

@@ -41,14 +41,19 @@ fn test_invalid_envelope_format() -> Result<()> {
 
 #[test]
 fn test_storage_backend_option() -> Result<()> {
-    run_cli_contains(&["--storage", "mainline", "--help"], "mainline")?;
-    run_cli_contains(&["--storage", "ipfs", "--help"], "ipfs")?;
+    // Storage option is now command-specific, not global
+    run_cli_contains(
+        &["check", "--storage", "mainline", "--help"],
+        "mainline",
+    )?;
+    run_cli_contains(&["put", "--storage", "ipfs", "--help"], "ipfs")?;
     Ok(())
 }
 
 #[test]
 fn test_invalid_storage_backend() -> Result<()> {
-    run_cli_expect_error(&["--storage", "invalid", "check"])?;
+    // Storage option is now command-specific
+    run_cli_expect_error(&["check", "--storage", "invalid"])?;
     Ok(())
 }
 

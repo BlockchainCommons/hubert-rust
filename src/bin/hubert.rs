@@ -20,19 +20,6 @@ use hubert::{
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Storage backend to use
-    #[arg(long, short, global = true, default_value = "mainline")]
-    storage: StorageBackend,
-
-    /// Server/IPFS host (for --storage server or --storage ipfs)
-    #[arg(long, global = true)]
-    host: Option<String>,
-
-    /// Port (for --storage server, --storage ipfs, --storage hybrid, or server
-    /// command)
-    #[arg(long, global = true)]
-    port: Option<u16>,
-
     /// Enable verbose logging
     #[arg(long, short, global = true)]
     verbose: bool,
@@ -63,6 +50,18 @@ enum Commands {
 
     /// Store an envelope at an ARID
     Put {
+        /// Storage backend to use
+        #[arg(long, short, default_value = "mainline")]
+        storage: StorageBackend,
+
+        /// Server/IPFS host (for --storage server)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Port (for --storage server, --storage ipfs, or --storage hybrid)
+        #[arg(long)]
+        port: Option<u16>,
+
         /// ARID key (ur:arid format)
         #[arg(value_name = "ARID")]
         arid: String,
@@ -85,6 +84,18 @@ enum Commands {
 
     /// Retrieve an envelope by ARID
     Get {
+        /// Storage backend to use
+        #[arg(long, short, default_value = "mainline")]
+        storage: StorageBackend,
+
+        /// Server/IPFS host (for --storage server)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Port (for --storage server, --storage ipfs, or --storage hybrid)
+        #[arg(long)]
+        port: Option<u16>,
+
         /// ARID key (ur:arid format)
         #[arg(value_name = "ARID")]
         arid: String,
@@ -95,10 +106,26 @@ enum Commands {
     },
 
     /// Check if storage backend is available
-    Check,
+    Check {
+        /// Storage backend to use
+        #[arg(long, short, default_value = "mainline")]
+        storage: StorageBackend,
+
+        /// Server/IPFS host (for --storage server)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Port (for --storage server, --storage ipfs, or --storage hybrid)
+        #[arg(long)]
+        port: Option<u16>,
+    },
 
     /// Start the Hubert HTTP server
     Server {
+        /// Port for the server to listen on (default: 45678)
+        #[arg(long)]
+        port: Option<u16>,
+
         /// SQLite database file path for persistent storage.
         /// If a directory is provided, uses 'hubert.sqlite' in that directory.
         /// If not provided, uses in-memory storage.
@@ -338,42 +365,6 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Validate port/host usage based on storage backend (skip for Server
-    // command)
-    if !matches!(cli.command, Commands::Server { .. }) {
-        match cli.storage {
-            StorageBackend::Mainline => {
-                if cli.port.is_some() {
-                    bail!(
-                        "--port option is not supported for --storage mainline"
-                    );
-                }
-                if cli.host.is_some() {
-                    bail!(
-                        "--host option is not supported for --storage mainline"
-                    );
-                }
-            }
-            StorageBackend::Ipfs => {
-                if cli.host.is_some() {
-                    bail!(
-                        "--host option is not supported for --storage ipfs (always uses 127.0.0.1)"
-                    );
-                }
-            }
-            StorageBackend::Hybrid => {
-                if cli.host.is_some() {
-                    bail!(
-                        "--host option is not supported for --storage hybrid (always uses 127.0.0.1)"
-                    );
-                }
-            }
-            StorageBackend::Server => {
-                // host and port are allowed
-            }
-        }
-    }
-
     match cli.command {
         Commands::Generate { generate_type } => match generate_type {
             GenerateType::Arid => {
@@ -386,11 +377,44 @@ async fn main() -> Result<()> {
             }
         },
 
-        Commands::Put { arid, envelope, ttl, pin } => {
+        Commands::Put { storage, host, port, arid, envelope, ttl, pin } => {
+            // Validate port/host usage based on storage backend
+            match storage {
+                StorageBackend::Mainline => {
+                    if port.is_some() {
+                        bail!(
+                            "--port option is not supported for --storage mainline"
+                        );
+                    }
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage mainline"
+                        );
+                    }
+                }
+                StorageBackend::Ipfs => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage ipfs (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Hybrid => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage hybrid (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Server => {
+                    // host and port are allowed
+                }
+            }
+
             let arid = parse_arid(&arid)?;
             let envelope = parse_envelope(&envelope)?;
 
-            match cli.storage {
+            match storage {
                 StorageBackend::Mainline => {
                     if ttl.is_some() {
                         bail!(
@@ -410,7 +434,7 @@ async fn main() -> Result<()> {
                             "--ttl option is only supported for --storage server"
                         );
                     }
-                    let port = cli.port.unwrap_or(5001);
+                    let port = port.unwrap_or(5001);
                     put_ipfs(&arid, &envelope, port, pin, cli.verbose).await?
                 }
                 StorageBackend::Hybrid => {
@@ -419,7 +443,7 @@ async fn main() -> Result<()> {
                             "--ttl option is only supported for --storage server"
                         );
                     }
-                    let port = cli.port.unwrap_or(5001);
+                    let port = port.unwrap_or(5001);
                     put_hybrid(&arid, &envelope, port, pin, cli.verbose).await?
                 }
                 StorageBackend::Server => {
@@ -428,32 +452,65 @@ async fn main() -> Result<()> {
                             "--pin option is only supported for --storage ipfs or --storage hybrid"
                         );
                     }
-                    let host = cli.host.as_deref().unwrap_or("127.0.0.1");
-                    let port = cli.port.unwrap_or(45678);
+                    let host = host.as_deref().unwrap_or("127.0.0.1");
+                    let port = port.unwrap_or(45678);
                     put_server(host, port, &arid, &envelope, ttl, cli.verbose)
                         .await?
                 }
             }
         }
 
-        Commands::Get { arid, timeout } => {
+        Commands::Get { storage, host, port, arid, timeout } => {
+            // Validate port/host usage based on storage backend
+            match storage {
+                StorageBackend::Mainline => {
+                    if port.is_some() {
+                        bail!(
+                            "--port option is not supported for --storage mainline"
+                        );
+                    }
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage mainline"
+                        );
+                    }
+                }
+                StorageBackend::Ipfs => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage ipfs (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Hybrid => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage hybrid (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Server => {
+                    // host and port are allowed
+                }
+            }
+
             let arid = parse_arid(&arid)?;
 
-            let envelope = match cli.storage {
+            let envelope = match storage {
                 StorageBackend::Mainline => {
                     get_mainline(&arid, timeout, cli.verbose).await?
                 }
                 StorageBackend::Ipfs => {
-                    let port = cli.port.unwrap_or(5001);
+                    let port = port.unwrap_or(5001);
                     get_ipfs(&arid, timeout, port, cli.verbose).await?
                 }
                 StorageBackend::Hybrid => {
-                    let port = cli.port.unwrap_or(5001);
+                    let port = port.unwrap_or(5001);
                     get_hybrid(&arid, timeout, port, cli.verbose).await?
                 }
                 StorageBackend::Server => {
-                    let host = cli.host.as_deref().unwrap_or("127.0.0.1");
-                    let port = cli.port.unwrap_or(45678);
+                    let host = host.as_deref().unwrap_or("127.0.0.1");
+                    let port = port.unwrap_or(45678);
                     get_server(host, port, &arid, timeout, cli.verbose).await?
                 }
             };
@@ -468,58 +525,102 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Check => match cli.storage {
-            StorageBackend::Mainline => check_mainline().await?,
-            StorageBackend::Ipfs => {
-                let port = cli.port.unwrap_or(5001);
-                check_ipfs(port).await?
+        Commands::Check { storage, host, port } => {
+            // Validate port/host usage based on storage backend
+            match storage {
+                StorageBackend::Mainline => {
+                    if port.is_some() {
+                        bail!(
+                            "--port option is not supported for --storage mainline"
+                        );
+                    }
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage mainline"
+                        );
+                    }
+                }
+                StorageBackend::Ipfs => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage ipfs (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Hybrid => {
+                    if host.is_some() {
+                        bail!(
+                            "--host option is not supported for --storage hybrid (always uses 127.0.0.1)"
+                        );
+                    }
+                }
+                StorageBackend::Server => {
+                    // host and port are allowed
+                }
             }
-            StorageBackend::Hybrid => {
-                // Check both DHT and IPFS
-                check_mainline().await?;
-                let port = cli.port.unwrap_or(5001);
-                check_ipfs(port).await?;
-                println!("✓ Hybrid storage is available (DHT + IPFS)");
-            }
-            StorageBackend::Server => {
-                // Check if server is reachable via health endpoint
-                use tokio::time::{Duration, timeout};
 
-                let host = cli.host.as_deref().unwrap_or("127.0.0.1");
-                let port = cli.port.unwrap_or(45678);
-                let url = format!("http://{}:{}/health", host, port);
+            match storage {
+                StorageBackend::Mainline => check_mainline().await?,
+                StorageBackend::Ipfs => {
+                    let port = port.unwrap_or(5001);
+                    check_ipfs(port).await?
+                }
+                StorageBackend::Hybrid => {
+                    // Check both DHT and IPFS
+                    check_mainline().await?;
+                    let port = port.unwrap_or(5001);
+                    check_ipfs(port).await?;
+                    println!("✓ Hybrid storage is available (DHT + IPFS)");
+                }
+                StorageBackend::Server => {
+                    // Check if server is reachable via health endpoint
+                    use tokio::time::{Duration, timeout};
 
-                let client = reqwest::Client::new();
+                    let host = host.as_deref().unwrap_or("127.0.0.1");
+                    let port = port.unwrap_or(45678);
+                    let url = format!("http://{}:{}/health", host, port);
 
-                // Try to connect to health endpoint with 2-second timeout
-                match timeout(Duration::from_secs(2), client.get(&url).send())
+                    let client = reqwest::Client::new();
+
+                    // Try to connect to health endpoint with 2-second timeout
+                    match timeout(
+                        Duration::from_secs(2),
+                        client.get(&url).send(),
+                    )
                     .await
-                {
-                    Ok(Ok(response)) => {
-                        if response.status().is_success() {
-                            // Try to parse the JSON response
-                            if let Ok(text) = response.text().await {
-                                if let Ok(json) =
-                                    serde_json::from_str::<serde_json::Value>(
-                                        &text,
-                                    )
-                                {
-                                    if json
-                                        .get("server")
-                                        .and_then(|v| v.as_str())
-                                        == Some("hubert")
-                                    {
-                                        let version = json
-                                            .get("version")
+                    {
+                        Ok(Ok(response)) => {
+                            if response.status().is_success() {
+                                // Try to parse the JSON response
+                                if let Ok(text) = response.text().await {
+                                    if let Ok(json) = serde_json::from_str::<
+                                        serde_json::Value,
+                                    >(
+                                        &text
+                                    ) {
+                                        if json
+                                            .get("server")
                                             .and_then(|v| v.as_str())
-                                            .unwrap_or("unknown");
-                                        println!(
-                                            "✓ Hubert server is available at {}:{} (version {})",
-                                            host, port, version
-                                        );
+                                            == Some("hubert")
+                                        {
+                                            let version = json
+                                                .get("version")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown");
+                                            println!(
+                                                "✓ Hubert server is available at {}:{} (version {})",
+                                                host, port, version
+                                            );
+                                        } else {
+                                            bail!(
+                                                "✗ Server at {}:{} is not a Hubert server",
+                                                host,
+                                                port
+                                            );
+                                        }
                                     } else {
                                         bail!(
-                                            "✗ Server at {}:{} is not a Hubert server",
+                                            "✗ Server at {}:{} returned invalid health response",
                                             host,
                                             port
                                         );
@@ -533,50 +634,37 @@ async fn main() -> Result<()> {
                                 }
                             } else {
                                 bail!(
-                                    "✗ Server at {}:{} returned invalid health response",
+                                    "✗ Server at {}:{} is not available (status: {})",
                                     host,
-                                    port
+                                    port,
+                                    response.status()
                                 );
                             }
-                        } else {
+                        }
+                        Ok(Err(e)) => {
                             bail!(
-                                "✗ Server at {}:{} is not available (status: {})",
+                                "✗ Server is not available at {}:{}: {}",
                                 host,
                                 port,
-                                response.status()
-                            );
+                                e
+                            )
                         }
-                    }
-                    Ok(Err(e)) => {
-                        bail!(
-                            "✗ Server is not available at {}:{}: {}",
-                            host,
-                            port,
-                            e
-                        )
-                    }
-                    Err(_) => {
-                        bail!(
-                            "✗ Server is not available at {}:{}: connection timeout",
-                            host,
-                            port
-                        )
+                        Err(_) => {
+                            bail!(
+                                "✗ Server is not available at {}:{}: connection timeout",
+                                host,
+                                port
+                            )
+                        }
                     }
                 }
             }
-        },
+        }
 
-        Commands::Server { sqlite } => {
+        Commands::Server { port, sqlite } => {
             use hubert::server::{Server, ServerConfig};
 
-            // Validate that --storage is not used with server command
-            if matches!(cli.storage, StorageBackend::Server) {
-                bail!(
-                    "--storage server is for clients using the server, not for running the server itself. Use: hubert server"
-                );
-            }
-
-            let port = cli.port.unwrap_or(45678);
+            let port = port.unwrap_or(45678);
             let config = ServerConfig {
                 port,
                 max_ttl: 86400, // 24 hours
