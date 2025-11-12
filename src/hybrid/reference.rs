@@ -58,19 +58,16 @@ pub fn is_reference_envelope(envelope: &Envelope) -> bool {
 
     // Check for dereferenceVia: "ipfs" assertion
     let has_dereference_via = envelope.assertions().iter().any(|assertion| {
-        if let Ok(predicate) = assertion.try_predicate() {
-            if let Some(kv) = predicate.as_known_value() {
-                if kv.value() == known_values::DEREFERENCE_VIA_RAW {
-                    if let Ok(object) = assertion.try_object() {
-                        if let Ok(cbor) = object.subject().try_leaf() {
-                            if let Ok(text) = cbor.try_into_text() {
-                                return text == "ipfs";
-                            }
-                        }
-                    }
-                }
-            }
+        if let Ok(predicate) = assertion.try_predicate()
+            && let Some(kv) = predicate.as_known_value()
+            && kv.value() == known_values::DEREFERENCE_VIA_RAW
+            && let Ok(object) = assertion.try_object()
+            && let Ok(cbor) = object.subject().try_leaf()
+            && let Ok(text) = cbor.try_into_text()
+        {
+            return text == "ipfs";
         }
+
         false
     });
 
@@ -111,19 +108,18 @@ pub fn extract_reference_arid(envelope: &Envelope) -> Result<ARID, Error> {
 
     // Find the id assertion and extract the ARID
     for assertion in envelope.assertions() {
-        if let Ok(predicate) = assertion.try_predicate() {
-            if let Some(kv) = predicate.as_known_value() {
-                if kv.value() == known_values::ID_RAW {
-                    // The object's subject should be an ARID
-                    if let Ok(object) = assertion.try_object() {
-                        if let Ok(cbor) = object.subject().try_leaf() {
-                            if let Ok(arid) = ARID::try_from(cbor.clone()) {
-                                return Ok(arid);
-                            } else {
-                                return Err(Error::InvalidReferenceArid);
-                            }
-                        }
-                    }
+        if let Ok(predicate) = assertion.try_predicate()
+            && let Some(kv) = predicate.as_known_value()
+            && kv.value() == known_values::ID_RAW
+        {
+            // The object's subject should be an ARID
+            if let Ok(object) = assertion.try_object()
+                && let Ok(cbor) = object.subject().try_leaf()
+            {
+                if let Ok(arid) = ARID::try_from(cbor.clone()) {
+                    return Ok(arid);
+                } else {
+                    return Err(Error::InvalidReferenceArid);
                 }
             }
         }

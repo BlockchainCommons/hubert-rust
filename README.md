@@ -64,7 +64,7 @@ Add Hubert to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hubert = "0.2.0"
+hubert = "0.3.0"
 bc-components = "^0.25.0"
 bc-envelope = "^0.34.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
@@ -187,6 +187,12 @@ Provide sovereign messaging infrastructure:
 - No metadata exposed to network observers (only GSTP envelope structure visible)
 
 ## Version History
+
+### 0.3.0 - November 12, 2025
+
+- Move --storage, --host, and --port options from global to Put/Get/Check commands.
+- Align to dependencies.
+- Format.
 
 ### 0.2.0 - November 7, 2025
 

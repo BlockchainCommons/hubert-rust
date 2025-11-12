@@ -296,10 +296,11 @@ async fn put_hybrid(
     }
 
     // Extract and print CID if pinning was requested and IPFS was used
-    if pin && result.contains("ipfs://") {
-        if let Some(cid_part) = result.split("ipfs://").nth(1) {
-            println!("CID: {}", cid_part);
-        }
+    if pin
+        && result.contains("ipfs://")
+        && let Some(cid_part) = result.split("ipfs://").nth(1)
+    {
+        println!("CID: {}", cid_part);
     }
 
     Ok(())

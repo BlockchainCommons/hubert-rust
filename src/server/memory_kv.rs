@@ -37,14 +37,14 @@ impl MemoryKv {
         let storage = self.storage.read().unwrap();
 
         if let Some(entry) = storage.get(arid) {
-            if let Some(expires_at) = entry.expires_at {
-                if Instant::now() >= expires_at {
-                    drop(storage);
-                    // Entry is expired, remove it
-                    let mut storage = self.storage.write().unwrap();
-                    storage.remove(arid);
-                    return Ok(false);
-                }
+            if let Some(expires_at) = entry.expires_at
+                && Instant::now() >= expires_at
+            {
+                drop(storage);
+                // Entry is expired, remove it
+                let mut storage = self.storage.write().unwrap();
+                storage.remove(arid);
+                return Ok(false);
             }
             Ok(true)
         } else {
@@ -119,18 +119,18 @@ impl KvStore for MemoryKv {
 
                 if let Some(entry) = storage.get(arid) {
                     // Check if expired
-                    if let Some(expires_at) = entry.expires_at {
-                        if Instant::now() >= expires_at {
-                            // Entry is expired, remove it
-                            storage.remove(arid);
-                            if verbose {
-                                verbose_println(&format!(
-                                    "GET {} EXPIRED",
-                                    arid.ur_string()
-                                ));
-                            }
-                            return Ok(None);
+                    if let Some(expires_at) = entry.expires_at
+                        && Instant::now() >= expires_at
+                    {
+                        // Entry is expired, remove it
+                        storage.remove(arid);
+                        if verbose {
+                            verbose_println(&format!(
+                                "GET {} EXPIRED",
+                                arid.ur_string()
+                            ));
                         }
+                        return Ok(None);
                     }
 
                     // Parse CBOR bytes back to Envelope
