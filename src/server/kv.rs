@@ -135,6 +135,8 @@ impl KvStore for ServerKvClient {
 
         bc_components::register_tags();
 
+        let mut printed_dot = false;
+
         if verbose {
             verbose_println("Starting server get operation");
         }
@@ -161,8 +163,10 @@ impl KvStore for ServerKvClient {
 
             match response.status() {
                 reqwest::StatusCode::OK => {
-                    if verbose {
+                    if verbose && printed_dot {
                         verbose_newline();
+                    }
+                    if verbose {
                         verbose_println("Value found on server");
                     }
                     let envelope_str = response.text().await.map_err(|e| {
@@ -181,8 +185,10 @@ impl KvStore for ServerKvClient {
                     // Not found yet - check if we should keep polling
                     if Instant::now() >= deadline {
                         // Timeout reached
-                        if verbose {
+                        if verbose && printed_dot {
                             verbose_newline();
+                        }
+                        if verbose {
                             verbose_println("Timeout reached, value not found");
                         }
                         return Ok(None);
@@ -191,6 +197,7 @@ impl KvStore for ServerKvClient {
                     // Print polling dot if verbose
                     if verbose {
                         verbose_print_dot();
+                        printed_dot = true;
                     }
 
                     // Wait before retrying (now 1000ms)

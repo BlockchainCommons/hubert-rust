@@ -31,7 +31,8 @@ fn test_check_mainline_default() -> Result<()> {
 
 #[test]
 fn test_check_ipfs() -> Result<()> {
-    // This test handles both success and failure cases (when IPFS daemon is not running)
+    // This test handles both success and failure cases (when IPFS daemon is not
+    // running)
     let output = run_cli_allow_failure(&["check", "--storage", "ipfs"]);
 
     if output.contains("IPFS is available") {
