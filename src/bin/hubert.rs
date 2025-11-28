@@ -19,6 +19,7 @@ use hubert::{
 /// Hubert: Distributed substrate for multiparty transactions
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
+#[command(infer_subcommands = true)]
 struct Cli {
     /// Enable verbose logging
     #[arg(long, short, global = true)]
