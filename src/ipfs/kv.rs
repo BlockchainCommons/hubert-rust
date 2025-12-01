@@ -12,7 +12,10 @@ use super::{
     error::Error as IpfsError,
     value::{add_bytes, cat_bytes, pin_cid},
 };
-use crate::{Error, KvStore, Result, arid_derivation::derive_ipfs_key_name};
+use crate::{
+    Error, KvStore, Result,
+    arid_derivation::{derive_ipfs_key_name, obfuscate_with_arid},
+};
 
 /// IPFS-backed key-value store using IPNS for ARID-based addressing.
 ///
@@ -299,15 +302,22 @@ impl IpfsKv {
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
 
-        // Check size
-        if bytes.len() > self.max_envelope_size {
+        if verbose {
+            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+        }
+
+        // Obfuscate with ARID-derived key so it appears as random data
+        let obfuscated = obfuscate_with_arid(arid, &bytes);
+
+        // Check size after obfuscation (same size, but check anyway)
+        if obfuscated.len() > self.max_envelope_size {
             return Err(
-                IpfsError::EnvelopeTooLarge { size: bytes.len() }.into()
+                IpfsError::EnvelopeTooLarge { size: obfuscated.len() }.into()
             );
         }
 
         if verbose {
-            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+            verbose_println("Obfuscated envelope data");
         }
 
         // Get or create IPNS key
@@ -318,11 +328,11 @@ impl IpfsKv {
 
         let key_name = derive_ipfs_key_name(arid);
 
-        // Add to IPFS
+        // Add obfuscated data to IPFS
         if verbose {
             verbose_println("Adding content to IPFS");
         }
-        let cid = add_bytes(&self.client, bytes).await?;
+        let cid = add_bytes(&self.client, obfuscated).await?;
 
         if verbose {
             verbose_println(&format!("Content CID: {}", cid));
@@ -416,14 +426,21 @@ impl IpfsKv {
             verbose_println(&format!("Resolved to CID: {}", cid));
         }
 
-        // Cat CID
+        // Cat CID to get obfuscated bytes
         if verbose {
             verbose_println("Fetching content from IPFS");
         }
-        let bytes = cat_bytes(&self.client, &cid).await?;
+        let obfuscated_bytes = cat_bytes(&self.client, &cid).await?;
 
-        // Deserialize envelope
-        let envelope = Envelope::try_from_cbor_data(bytes)?;
+        // Deobfuscate using ARID-derived key
+        let deobfuscated = obfuscate_with_arid(arid, &obfuscated_bytes);
+
+        if verbose {
+            verbose_println("Deobfuscated envelope data");
+        }
+
+        // Deserialize envelope from deobfuscated data
+        let envelope = Envelope::try_from_cbor_data(deobfuscated)?;
 
         if verbose {
             verbose_println("IPFS get operation completed");

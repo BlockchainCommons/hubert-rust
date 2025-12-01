@@ -5,7 +5,10 @@ use dcbor::CBOREncodable;
 use mainline::{Dht, MutableItem, SigningKey};
 
 use super::error::Error as MainlineError;
-use crate::{Error, KvStore, Result, arid_derivation::derive_mainline_key};
+use crate::{
+    Error, KvStore, Result,
+    arid_derivation::{derive_mainline_key, obfuscate_with_arid},
+};
 
 /// Mainline DHT-backed key-value store using ARID-based addressing.
 ///
@@ -95,8 +98,7 @@ impl MainlineDhtKv {
     ///
     /// Uses the ARID-derived key material extended to 32 bytes for ed25519.
     fn derive_signing_key(arid: &ARID) -> SigningKey {
-        let key_hex = derive_mainline_key(arid);
-        let key_bytes = hex::decode(&key_hex).expect("valid hex from derive");
+        let key_bytes = derive_mainline_key(arid);
 
         // Extend to 32 bytes if needed (ARID gives us 20, we need 32)
         let mut seed = [0u8; 32];
@@ -155,15 +157,23 @@ impl MainlineDhtKv {
         // Serialize envelope
         let bytes = envelope.to_cbor_data();
 
-        // Check size
-        if bytes.len() > self.max_value_size {
-            return Err(
-                MainlineError::ValueTooLarge { size: bytes.len() }.into()
-            );
+        if verbose {
+            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+        }
+
+        // Obfuscate with ARID-derived key so it appears as random data
+        let obfuscated = obfuscate_with_arid(arid, &bytes);
+
+        // Check size after obfuscation (same size, but check anyway)
+        if obfuscated.len() > self.max_value_size {
+            return Err(MainlineError::ValueTooLarge {
+                size: obfuscated.len(),
+            }
+            .into());
         }
 
         if verbose {
-            verbose_println(&format!("Envelope size: {} bytes", bytes.len()));
+            verbose_println("Obfuscated envelope data");
         }
 
         // Derive signing key from ARID
@@ -187,11 +197,11 @@ impl MainlineDhtKv {
             return Err(Error::AlreadyExists { arid: arid.ur_string() });
         }
 
-        // Create mutable item with seq=1 (first write)
+        // Create mutable item with seq=1 (first write) using obfuscated data
         if verbose {
             verbose_println("Creating mutable DHT item");
         }
-        let item = MutableItem::new(signing_key, &bytes, 1, salt_opt);
+        let item = MutableItem::new(signing_key, &obfuscated, 1, salt_opt);
 
         // Put to DHT (no CAS since we verified it doesn't exist)
         if verbose {
@@ -253,10 +263,17 @@ impl MainlineDhtKv {
                     verbose_newline();
                     verbose_println("Value found in DHT");
                 }
-                // Deserialize envelope from value
-                let envelope = Envelope::try_from_cbor_data(
-                    mutable_item.value().to_vec(),
-                )?;
+
+                // Deobfuscate the data using ARID-derived key
+                let obfuscated_bytes = mutable_item.value().to_vec();
+                let deobfuscated = obfuscate_with_arid(arid, &obfuscated_bytes);
+
+                if verbose {
+                    verbose_println("Deobfuscated envelope data");
+                }
+
+                // Deserialize envelope from deobfuscated data
+                let envelope = Envelope::try_from_cbor_data(deobfuscated)?;
 
                 if verbose {
                     verbose_println("Mainline DHT get operation completed");

@@ -37,6 +37,7 @@ Uses BEP-44 mutable storage for write-once ARID-keyed envelopes:
 - **Dependencies**: None (embedded DHT client)
 - **Latency**: 100ms-5s for get operations
 - **Durability**: Temporary (hours to days, no re-publication)
+- **Obfuscation**: All payloads are obfuscated using ChaCha20 with an ARID-derived key, making stored data appear as uniform random bytes
 
 ### 2. IPFS (IpfsKv)
 
@@ -50,15 +51,17 @@ Uses IPNS for write-once ARID-keyed envelopes:
 - **Dependencies**: Kubo daemon (http://127.0.0.1:5001)
 - **Latency**: 1-10s for IPNS resolution
 - **Durability**: Requires pinning for persistence
+- **Obfuscation**: All payloads are obfuscated using ChaCha20 with an ARID-derived key, making stored data appear as uniform random bytes
 
 ### 3. Hybrid Storage (HybridKv)
 
 Combines DHT and IPFS with automatic size-based routing:
 
-- **Small envelopes (≤1000 bytes)**: Direct DHT storage
-- **Large envelopes (>1000 bytes)**: Encrypted reference envelope in DHT → actual envelope in IPFS
-- **Reference Encryption**: Reference envelopes are encrypted with a key derived from the original ARID using HKDF, preventing exposure of the IPFS ARID in the DHT
-- **Reference Envelope Format** (before encryption):
+- **Small envelopes (≤1000 bytes)**: Direct DHT storage (obfuscated by DHT layer)
+- **Large envelopes (>1000 bytes)**: Reference envelope in DHT → actual envelope in IPFS
+  - Actual envelope stored in IPFS with new reference ARID (obfuscated by IPFS layer)
+  - Reference envelope stored in DHT with original ARID (obfuscated by DHT layer)
+- **Reference Envelope Format**:
   ```
   '' [
       'dereferenceVia': "ipfs",
@@ -67,6 +70,7 @@ Combines DHT and IPFS with automatic size-based routing:
   ]
   ```
 - **Transparent**: Caller doesn't need to know which backend is used
+- **Obfuscation**: Both layers obfuscate their payloads independently, all data appears as uniform random bytes
 
 **Comparison:**
 

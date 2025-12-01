@@ -10,8 +10,8 @@ use super::{
     },
 };
 use crate::{
-    KvStore, Result, arid_derivation::derive_reference_encryption_key,
-    ipfs::IpfsKv, logging::verbose_println, mainline::MainlineDhtKv,
+    KvStore, Result, ipfs::IpfsKv, logging::verbose_println,
+    mainline::MainlineDhtKv,
 };
 
 /// Hybrid storage layer combining Mainline DHT and IPFS.
@@ -115,7 +115,7 @@ impl HybridKv {
     ) -> Result<String> {
         // Check if it fits in DHT
         if self.fits_in_dht(envelope) {
-            // Store directly in DHT
+            // Store directly in DHT (DHT handles obfuscation)
             if verbose {
                 verbose_println(&format!(
                     "Storing envelope in DHT (size ≤ {} bytes)",
@@ -132,7 +132,8 @@ impl HybridKv {
                 );
             }
 
-            // 1. Store actual envelope in IPFS with a new ARID
+            // 1. Store actual envelope in IPFS with a new ARID (IPFS handles
+            //    obfuscation with reference_arid)
             let reference_arid = ARID::new();
             if verbose {
                 verbose_println(&format!(
@@ -149,25 +150,14 @@ impl HybridKv {
             let reference =
                 create_reference_envelope(&reference_arid, envelope_size);
 
-            // 3. Encrypt reference envelope with key derived from original ARID
-            let encryption_key = derive_reference_encryption_key(arid);
-            let encrypted_reference = reference.encrypt(&encryption_key);
-
+            // 3. Store reference envelope in DHT at original ARID (DHT handles
+            //    obfuscation with original arid)
             if verbose {
                 verbose_println(
-                    "Encrypted reference envelope to hide IPFS ARID",
+                    "Storing reference envelope in DHT at original ARID",
                 );
             }
-
-            // 4. Store encrypted reference in DHT
-            if verbose {
-                verbose_println(
-                    "Storing encrypted reference envelope in DHT at original ARID",
-                );
-            }
-            self.dht
-                .put(arid, &encrypted_reference, ttl_seconds, verbose)
-                .await?;
+            self.dht.put(arid, &reference, ttl_seconds, verbose).await?;
 
             Ok(format!(
                 "Stored in IPFS (ref: {}) via DHT at ARID: {}",
@@ -184,59 +174,22 @@ impl HybridKv {
         timeout_seconds: Option<u64>,
         verbose: bool,
     ) -> Result<Option<Envelope>> {
-        // 1. Try to get from DHT
+        // 1. Try to get from DHT (DHT handles deobfuscation)
         let dht_envelope = self.dht.get(arid, timeout_seconds, verbose).await?;
 
         match dht_envelope {
             None => Ok(None),
             Some(envelope) => {
-                // 2. Check if envelope is encrypted
-                if !envelope.is_encrypted() {
-                    // Not encrypted, treat as direct payload
-                    if verbose {
-                        verbose_println(
-                            "Envelope not encrypted, treating as direct payload",
-                        );
-                    }
-                    return Ok(Some(envelope));
-                }
-
-                // 3. Attempt to decrypt the envelope with key derived from ARID
-                let encryption_key = derive_reference_encryption_key(arid);
-                let decrypted_envelope = match envelope.decrypt(&encryption_key)
-                {
-                    Ok(decrypted) => {
-                        if verbose {
-                            verbose_println(
-                                "Successfully decrypted reference envelope",
-                            );
-                        }
-                        decrypted
-                    }
-                    Err(_) => {
-                        // Decryption with our reference key failed - envelope
-                        // is encrypted with a different key (e.g., user's own
-                        // encryption key). Treat as actual payload.
-                        if verbose {
-                            verbose_println(
-                                "Encrypted with different key, treating as direct payload",
-                            );
-                        }
-                        return Ok(Some(envelope));
-                    }
-                };
-
-                // 4. Check if the decrypted envelope is a reference envelope
-                if is_reference_envelope(&decrypted_envelope) {
+                // 2. Check if the envelope is a reference envelope
+                if is_reference_envelope(&envelope) {
                     if verbose {
                         verbose_println(
                             "Found reference envelope, fetching actual envelope from IPFS",
                         );
                     }
 
-                    // 5. Extract reference ARID
-                    let reference_arid =
-                        extract_reference_arid(&decrypted_envelope)?;
+                    // 3. Extract reference ARID
+                    let reference_arid = extract_reference_arid(&envelope)?;
 
                     if verbose {
                         verbose_println(&format!(
@@ -245,7 +198,8 @@ impl HybridKv {
                         ));
                     }
 
-                    // 6. Retrieve actual envelope from IPFS
+                    // 4. Retrieve actual envelope from IPFS (IPFS handles
+                    //    deobfuscation with reference_arid)
                     let ipfs_envelope = self
                         .ipfs
                         .get(&reference_arid, timeout_seconds, verbose)
@@ -263,11 +217,13 @@ impl HybridKv {
                         None => Err(HybridError::ContentNotFound.into()),
                     }
                 } else {
-                    // Successfully decrypted with our reference key, but it's
-                    // not a valid reference envelope. This indicates data
-                    // corruption or malicious data, since we only encrypt
-                    // reference envelopes with this key.
-                    Err(HybridError::InvalidDecryptedReference.into())
+                    // Not a reference envelope, return it directly
+                    if verbose {
+                        verbose_println(
+                            "Envelope is not a reference, treating as direct payload",
+                        );
+                    }
+                    Ok(Some(envelope))
                 }
             }
         }
