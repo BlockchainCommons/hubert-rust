@@ -64,9 +64,9 @@ Add Hubert to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hubert = "0.3.0"
-bc-components = "^0.25.0"
-bc-envelope = "^0.34.0"
+hubert = "0.4.0"
+bc-components = "^0.29.0"
+bc-envelope = "^0.38.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -187,6 +187,13 @@ Provide sovereign messaging infrastructure:
 - No metadata exposed to network observers (only GSTP envelope structure visible)
 
 ## Version History
+
+### 0.4.0 - December 4, 2025
+
+- Implement obfuscation using ChaCha20 for all DHT and IPFS storage.
+- Support abbreviated commands in CLI.
+- Improve logging and progress indicators.
+- Align to dependencies.
 
 ### 0.3.0 - November 12, 2025
 
