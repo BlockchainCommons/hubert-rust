@@ -64,9 +64,9 @@ Add Hubert to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hubert = "0.4.0"
-bc-components = "^0.29.0"
-bc-envelope = "^0.38.0"
+hubert = "0.5.0"
+bc-components = "^0.30.0"
+bc-envelope = "^0.39.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -187,6 +187,12 @@ Provide sovereign messaging infrastructure:
 - No metadata exposed to network observers (only GSTP envelope structure visible)
 
 ## Version History
+
+### 0.5.0 - December 5, 2025
+
+- Align to dependencies.
+- Updated `axum` to ^0.8.7.
+- Updated test utilities to use `cargo_bin_cmd!` macro.
 
 ### 0.4.0 - December 4, 2025
 

@@ -1,6 +1,6 @@
 [package]
 name = "hubert"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 description = "Secure distributed substrate for multiparty transactions using write-once key-value storage with ARID-based addressing"
 authors = ["Blockchain Commons"]
