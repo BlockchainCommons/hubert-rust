@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
 use anyhow::{Result, bail};
-use assert_cmd::Command;
 
 /// Run the hubert CLI with the given arguments.
 pub fn run_cli_raw(args: &[&str]) -> Result<String> {
-    let output = Command::cargo_bin("hubert").unwrap().args(args).assert();
+    let output = assert_cmd::cargo::cargo_bin_cmd!("hubert")
+        .args(args)
+        .assert();
 
     if output.get_output().status.success() {
         Ok(String::from_utf8(output.get_output().stdout.to_vec()).unwrap())
@@ -38,7 +39,9 @@ pub fn run_cli_expect(args: &[&str], expected: &str) -> Result<()> {
 
 /// Run the hubert CLI and expect it to fail.
 pub fn run_cli_expect_error(args: &[&str]) -> Result<()> {
-    let result = Command::cargo_bin("hubert").unwrap().args(args).assert();
+    let result = assert_cmd::cargo::cargo_bin_cmd!("hubert")
+        .args(args)
+        .assert();
 
     if result.get_output().status.success() {
         bail!("Expected command to fail, but it succeeded");
@@ -63,8 +66,7 @@ pub fn run_cli_contains(args: &[&str], expected: &str) -> Result<()> {
 /// Run the hubert CLI and return output regardless of success/failure.
 /// Returns stdout if successful, stderr if failed.
 pub fn run_cli_allow_failure(args: &[&str]) -> String {
-    let output = Command::cargo_bin("hubert")
-        .unwrap()
+    let output = assert_cmd::cargo::cargo_bin_cmd!("hubert")
         .args(args)
         .output()
         .unwrap();

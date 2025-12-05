@@ -31,7 +31,7 @@ known-values = "^0.12.0"
 
 anyhow = "^1.0.0"
 async-trait = "0.1"
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "^0.8.7", features = ["macros"] }
 chacha20 = "0.9.1"
 clap = { version = "^4.4.3", features = ["derive", "unstable-styles"] }
 futures-util = "0.3"
