@@ -19,15 +19,15 @@ name = "hubert"
 path = "src/bin/hubert.rs"
 
 [dependencies]
-bc-components = "^0.29.0"
-bc-crypto = "^0.13.0"
-bc-envelope = { version = "^0.38.0", features = ["multithreaded"] }
-bc-rand = "^0.4.2"
-bc-ur = "^0.17.0"
-bc-xid = "^0.17.0"
-dcbor = { version = "^0.24.0", features = ["multithreaded"] }
-gstp = "^0.12.0"
-known-values = "^0.12.0"
+bc-components = "^0.30.0"
+bc-crypto = "^0.14.0"
+bc-envelope = { version = "^0.39.0", features = ["multithreaded"] }
+bc-rand = "^0.5.0"
+bc-ur = "^0.18.0"
+bc-xid = "^0.18.0"
+dcbor = { version = "^0.24.1", features = ["multithreaded"] }
+gstp = "^0.13.0"
+known-values = "^0.13.0"
 
 anyhow = "^1.0.0"
 async-trait = "0.1"
