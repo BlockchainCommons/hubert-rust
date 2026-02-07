@@ -42,7 +42,7 @@ mainline = "6"
 reqwest = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlite = "0.37.0"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "macros", "rt-multi-thread"] }
 tower = "0.5"

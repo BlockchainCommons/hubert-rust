@@ -7,7 +7,7 @@ use std::{
 use bc_components::ARID;
 use bc_envelope::Envelope;
 use bc_ur::prelude::*;
-use sqlite::{Connection, State};
+use rusqlite::{params, Connection, OptionalExtension};
 use tokio::time::sleep;
 
 use super::Error as ServerError;
@@ -39,10 +39,12 @@ impl SqliteKv {
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).map_err(ServerError::from)?;
+            std::fs::create_dir_all(parent)
+                .map_err(ServerError::from)?;
         }
 
-        let connection = sqlite::open(&db_path).map_err(ServerError::from)?;
+        let connection = Connection::open(&db_path)
+            .map_err(ServerError::from)?;
 
         // Create table if it doesn't exist
         let schema = "
@@ -53,7 +55,9 @@ impl SqliteKv {
             );
             CREATE INDEX IF NOT EXISTS idx_expires_at ON hubert_store(expires_at);
         ";
-        connection.execute(schema).map_err(ServerError::from)?;
+        connection
+            .execute_batch(schema)
+            .map_err(ServerError::from)?;
 
         let kv = Self {
             db_path,
@@ -80,42 +84,36 @@ impl SqliteKv {
 
                 if let Ok(conn) = connection.lock() {
                     // First collect the ARIDs that will be deleted
-                    let select_query = "SELECT arid FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?";
-                    let arids: Vec<String> = match conn.prepare(select_query) {
-                        Ok(mut stmt) => {
-                            if stmt.bind((1, now)).is_ok() {
-                                let mut arids = Vec::new();
-                                while let Ok(State::Row) = stmt.next() {
-                                    if let Ok(arid) = stmt.read::<String, _>(0)
-                                    {
-                                        arids.push(arid);
-                                    }
-                                }
-                                arids
-                            } else {
-                                Vec::new()
-                            }
-                        }
-                        Err(_) => Vec::new(),
-                    };
+                    let select_query = "SELECT arid FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?1";
+                    let arids: Vec<String> = conn
+                        .prepare(select_query)
+                        .and_then(|mut stmt| {
+                            let rows = stmt.query_map(
+                                params![now],
+                                |row| row.get(0),
+                            )?;
+                            Ok(rows.filter_map(|r| r.ok()).collect())
+                        })
+                        .unwrap_or_default();
 
                     if !arids.is_empty() {
                         // Now delete them
-                        let delete_query = "DELETE FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?";
-                        let mut stmt = match conn.prepare(delete_query) {
-                            Ok(stmt) => stmt,
-                            Err(_) => continue,
-                        };
-
-                        if stmt.bind((1, now)).is_ok() {
-                            let _ = stmt.next();
+                        let delete_query = "DELETE FROM hubert_store WHERE expires_at IS NOT NULL AND expires_at <= ?1";
+                        if conn
+                            .execute(delete_query, params![now])
+                            .is_ok()
+                        {
                             use crate::logging::verbose_println;
                             let count = arids.len();
                             let arid_list = arids.join(" ");
                             verbose_println(&format!(
                                 "Pruned {} expired {}: {}",
                                 count,
-                                if count == 1 { "entry" } else { "entries" },
+                                if count == 1 {
+                                    "entry"
+                                } else {
+                                    "entries"
+                                },
                                 arid_list
                             ));
                         }
@@ -134,29 +132,24 @@ impl SqliteKv {
             .as_secs() as i64;
 
         let conn = self.connection.lock().unwrap();
-        let query = "SELECT expires_at FROM hubert_store WHERE arid = ?";
-        let mut stmt = conn.prepare(query).map_err(ServerError::from)?;
-        stmt.bind((1, arid_str.as_str()))
+        let query =
+            "SELECT expires_at FROM hubert_store WHERE arid = ?1";
+        let row: Option<Option<i64>> = conn
+            .query_row(query, params![arid_str], |row| row.get(0))
+            .optional()
             .map_err(ServerError::from)?;
 
-        match stmt.next().map_err(ServerError::from)? {
-            State::Row => {
+        match row {
+            Some(expires_at) => {
                 // Check if expired
-                let expires_at: Option<i64> =
-                    stmt.read(0).map_err(ServerError::from)?;
                 if let Some(expiry) = expires_at {
                     if now >= expiry {
                         // Entry is expired, remove it
-                        drop(stmt);
                         let delete_query =
-                            "DELETE FROM hubert_store WHERE arid = ?";
-                        let mut delete_stmt = conn
-                            .prepare(delete_query)
+                            "DELETE FROM hubert_store \
+                             WHERE arid = ?1";
+                        conn.execute(delete_query, params![arid_str])
                             .map_err(ServerError::from)?;
-                        delete_stmt
-                            .bind((1, arid_str.as_str()))
-                            .map_err(ServerError::from)?;
-                        delete_stmt.next().map_err(ServerError::from)?;
                         Ok(false)
                     } else {
                         Ok(true)
@@ -165,7 +158,7 @@ impl SqliteKv {
                     Ok(true)
                 }
             }
-            State::Done => Ok(false),
+            None => Ok(false),
         }
     }
 }
@@ -189,7 +182,9 @@ impl KvStore for SqliteKv {
                     arid.ur_string()
                 ));
             }
-            return Err(Error::AlreadyExists { arid: arid.ur_string() });
+            return Err(Error::AlreadyExists {
+                arid: arid.ur_string(),
+            });
         }
 
         let arid_str = arid.ur_string();
@@ -204,21 +199,14 @@ impl KvStore for SqliteKv {
         });
 
         let conn = self.connection.lock().unwrap();
-        let query = "INSERT INTO hubert_store (arid, envelope, expires_at) VALUES (?, ?, ?)";
-        let mut stmt = conn.prepare(query).map_err(ServerError::from)?;
-        stmt.bind((1, arid_str.as_str()))
-            .map_err(ServerError::from)?;
-        stmt.bind((2, envelope_str.as_str()))
-            .map_err(ServerError::from)?;
-
-        if let Some(expiry) = expires_at {
-            stmt.bind((3, expiry)).map_err(ServerError::from)?;
-        } else {
-            stmt.bind((3, sqlite::Value::Null))
-                .map_err(ServerError::from)?;
-        }
-
-        stmt.next().map_err(ServerError::from)?;
+        let query = "INSERT INTO hubert_store \
+                     (arid, envelope, expires_at) \
+                     VALUES (?1, ?2, ?3)";
+        conn.execute(
+            query,
+            params![arid_str, envelope_str, expires_at],
+        )
+        .map_err(ServerError::from)?;
 
         if verbose {
             let ttl_msg = ttl_seconds
@@ -256,38 +244,40 @@ impl KvStore for SqliteKv {
 
             let result = {
                 let conn = self.connection.lock().unwrap();
-                let query = "SELECT envelope, expires_at FROM hubert_store WHERE arid = ?";
-                let mut stmt =
-                    conn.prepare(query).map_err(ServerError::from)?;
-                stmt.bind((1, arid_str.as_str()))
+                let query = "SELECT envelope, expires_at \
+                             FROM hubert_store WHERE arid = ?1";
+                let row: Option<(String, Option<i64>)> = conn
+                    .query_row(query, params![arid_str], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .optional()
                     .map_err(ServerError::from)?;
 
-                match stmt.next().map_err(ServerError::from)? {
-                    State::Row => {
-                        let envelope_str: String =
-                            stmt.read(0).map_err(ServerError::from)?;
-                        let expires_at: Option<i64> =
-                            stmt.read(1).map_err(ServerError::from)?;
-
+                match row {
+                    Some((envelope_str, expires_at)) => {
                         // Check if expired
                         if let Some(expiry) = expires_at {
                             if now >= expiry {
                                 Some((None, true)) // expired
                             } else {
-                                Some((Some(envelope_str), false)) // valid
+                                Some((
+                                    Some(envelope_str),
+                                    false,
+                                )) // valid
                             }
                         } else {
                             Some((Some(envelope_str), false)) // no expiry
                         }
                     }
-                    State::Done => None, // not found
+                    None => None, // not found
                 }
             };
 
             match result {
                 Some((Some(envelope_str), false)) => {
                     // Entry found and not expired
-                    let envelope = Envelope::from_ur_string(&envelope_str)?;
+                    let envelope =
+                        Envelope::from_ur_string(&envelope_str)?;
 
                     if verbose {
                         verbose_println(&format!(
@@ -303,14 +293,13 @@ impl KvStore for SqliteKv {
                     // Entry is expired, remove it
                     let conn = self.connection.lock().unwrap();
                     let delete_query =
-                        "DELETE FROM hubert_store WHERE arid = ?";
-                    let mut delete_stmt = conn
-                        .prepare(delete_query)
-                        .map_err(ServerError::from)?;
-                    delete_stmt
-                        .bind((1, arid_str.as_str()))
-                        .map_err(ServerError::from)?;
-                    delete_stmt.next().map_err(ServerError::from)?;
+                        "DELETE FROM hubert_store \
+                         WHERE arid = ?1";
+                    conn.execute(
+                        delete_query,
+                        params![arid_str],
+                    )
+                    .map_err(ServerError::from)?;
 
                     if verbose {
                         verbose_println(&format!(
@@ -325,7 +314,8 @@ impl KvStore for SqliteKv {
                     if start.elapsed().as_secs() >= timeout {
                         if verbose {
                             verbose_println(&format!(
-                                "GET {} NOT_FOUND (timeout after {}s)",
+                                "GET {} NOT_FOUND \
+                                 (timeout after {}s)",
                                 arid.ur_string(),
                                 timeout
                             ));

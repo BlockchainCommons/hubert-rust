@@ -17,7 +17,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error("SQLite error: {0}")]
-    Sqlite(#[from] sqlite::Error),
+    Sqlite(#[from] rusqlite::Error),
 
     #[error("System time error: {0}")]
     SystemTimeError(#[from] std::time::SystemTimeError),
